@@ -56,12 +56,21 @@ export function AuthProvider({ children }) {
         if (matchedOrg) {
           setActiveOrg(matchedOrg);
           localStorage.setItem('julley_active_org_id', matchedOrg.id);
+        } else {
+          // Deleting the last organization must clear stale authorization context.
+          setActiveOrg(null);
+          localStorage.removeItem('julley_active_org_id');
         }
 
         if (matchedTenant) {
           setActiveTenant(matchedTenant);
           setEffectiveRole(matchedTenant.userRole);
           localStorage.setItem('julley_active_tenant_id', matchedTenant.id);
+        } else {
+          // Likewise, a deleted or unassigned tenant must not remain active.
+          setActiveTenant(null);
+          setEffectiveRole(null);
+          localStorage.removeItem('julley_active_tenant_id');
         }
       }
     } catch (err) {

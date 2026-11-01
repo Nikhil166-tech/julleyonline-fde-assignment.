@@ -160,4 +160,29 @@ test.describe('JulleyOnline End-to-End Real Persistence & RBAC Test Suite', () =
     // Member should NOT see "Create Board" button
     await expect(page.locator('button:has-text("Create Board")')).not.toBeVisible();
   });
+
+  test('E2E-05: Only Org Admin sees organization and workspace deletion controls', async ({ page }) => {
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'alice@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
+
+    await page.goto('/settings');
+    await expect(page.getByRole('button', { name: 'Delete Organization' })).toBeVisible();
+    await page.getByRole('button', { name: 'Workspace (Tenant)' }).click();
+    await expect(page.getByRole('button', { name: 'Delete Workspace' })).toBeVisible();
+
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'charlie@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
+
+    await page.goto('/settings');
+    await expect(page.getByRole('button', { name: 'Delete Organization' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Workspace (Tenant)' }).click();
+    await expect(page.getByRole('button', { name: 'Delete Workspace' })).toHaveCount(0);
+  });
+
 });

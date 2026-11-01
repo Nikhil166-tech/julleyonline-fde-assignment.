@@ -57,7 +57,7 @@ export function Header({ onToggleSidebar }) {
             >
               <Building2 className="w-4 h-4 text-brand-600 shrink-0" />
               <span className="max-w-[140px] sm:max-w-[180px] truncate">
-                {activeOrg?.name || 'Acme Technologies'}
+                {activeOrg?.name || 'Select Organization'}
               </span>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             </button>
