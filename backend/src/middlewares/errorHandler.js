@@ -22,15 +22,21 @@ export function errorHandler(err, req, res, next) {
 
   // Handle Zod Validation Errors
   if (err instanceof ZodError) {
+    const errorDetails = err.errors.map((e) => ({
+      path: e.path.join('.'),
+      message: e.message,
+    }));
+    const detailSummary = errorDetails.map((e) => e.message).join('. ');
+    const friendlyMessage = detailSummary
+      ? `Validation failed: ${detailSummary}`
+      : 'Validation failed: please check required fields';
+
     return res.status(400).json({
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Request payload validation failed',
-        details: err.errors.map((e) => ({
-          path: e.path.join('.'),
-          message: e.message,
-        })),
+        message: friendlyMessage,
+        details: errorDetails,
       },
     });
   }

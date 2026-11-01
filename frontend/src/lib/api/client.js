@@ -55,9 +55,16 @@ export async function apiRequest(endpoint, options = {}) {
 
   if (!response.ok) {
     // Unpack backend AppError / ZodError format
-    const errorMessage = data?.error?.message || data?.message || 'Request failed';
+    let errorMessage = data?.error?.message || data?.message || 'Request failed';
     const errorCode = data?.error?.code || 'ERROR';
     const errorDetails = data?.error?.details || null;
+
+    if (errorDetails && Array.isArray(errorDetails) && errorDetails.length > 0) {
+      const specificMessages = errorDetails.map((d) => d.message).filter(Boolean);
+      if (specificMessages.length > 0 && (!errorMessage || errorMessage === 'Request payload validation failed')) {
+        errorMessage = specificMessages.join('. ');
+      }
+    }
 
     // Handle token expiry or unauthorized
     if (response.status === 401 && !endpoint.includes('/auth/login')) {

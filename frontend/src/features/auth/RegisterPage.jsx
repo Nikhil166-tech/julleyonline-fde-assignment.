@@ -29,7 +29,16 @@ export function RegisterPage() {
     setLoading(true);
 
     try {
-      await register(formData);
+      await register({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        organizationName: formData.orgName,
+        organizationSlug: formData.orgSlug,
+        orgName: formData.orgName,
+        orgSlug: formData.orgSlug,
+        tenantName: formData.tenantName,
+      });
       navigate('/');
     } catch (err) {
       setError(err.message || 'Registration failed');
