@@ -639,20 +639,21 @@ export function DashboardPage() {
           description: `Move "${draggedTask.title}" to ${targetCol.name}`,
           taskId: draggedTask.id,
           boardId: board.id,
-          executeReversal: async (currentVersion) => {
+          expectedVersion: res.data.version,
+          executeReversal: async (expectedVersion) => {
             const rollbackRes = await api.post(`/tasks/${draggedTask.id}/move`, {
               targetColumnId: sourceCol.id,
               newPosition: draggedTask.position,
-              version: currentVersion,
+              version: expectedVersion,
             });
             fetchBoardSnapshot(board.id);
             return rollbackRes.data;
           },
-          executeForward: async (currentVersion) => {
+          executeForward: async (expectedVersion) => {
             const fwdRes = await api.post(`/tasks/${draggedTask.id}/move`, {
               targetColumnId: targetCol.id,
               newPosition: targetIndex,
-              version: currentVersion,
+              version: expectedVersion,
             });
             fetchBoardSnapshot(board.id);
             return fwdRes.data;

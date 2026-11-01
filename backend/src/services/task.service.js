@@ -38,6 +38,9 @@ export class TaskService {
 
     // 3. Atomically determine contiguous position and insert task
     return prisma.$transaction(async (tx) => {
+      // Lock target column to serialize concurrent creations and prevent position collisions
+      await tx.$executeRaw`SELECT 1 FROM columns WHERE id = ${columnId}::uuid FOR UPDATE`;
+
       const lastTask = await tx.task.findFirst({
         where: { columnId },
         orderBy: { position: 'desc' },
@@ -288,10 +291,26 @@ export class TaskService {
         `;
       }
 
+      // Re-read task after acquiring column locks to guarantee fresh authoritative position and version
+      const currentTask = await tx.task.findFirst({
+        where: { id: taskId, tenantId },
+        include: {
+          creator: { select: { id: true, name: true, email: true, avatarUrl: true } },
+          assignee: { select: { id: true, name: true, email: true, avatarUrl: true } },
+          column: { select: { id: true, name: true } },
+        },
+      });
+
+      if (!currentTask || currentTask.version !== version) {
+        throw new ConflictError('Task has been modified by another collaborator. Please refresh.', {
+          currentTask: currentTask || task,
+        });
+      }
+
       let clampedPos;
 
       // 5. Shift sibling tasks
-      if (task.columnId === targetColumnId) {
+      if (currentTask.columnId === targetColumnId) {
         // Reordering within the same column
         const maxTask = await tx.task.findFirst({
           where: { columnId: targetColumnId },
@@ -300,25 +319,25 @@ export class TaskService {
         const maxPos = maxTask ? maxTask.position : 0;
         clampedPos = Math.max(0, Math.min(newPosition, maxPos));
 
-        if (clampedPos < task.position) {
-          // Moving up: shift items between clampedPos and task.position - 1 down (+1)
+        if (clampedPos < currentTask.position) {
+          // Moving up: shift items between clampedPos and currentTask.position - 1 down (+1)
           await tx.$executeRaw`
             UPDATE tasks
             SET position = position + 1, updated_at = NOW()
             WHERE column_id = ${targetColumnId}::uuid
               AND position >= ${clampedPos}
-              AND position < ${task.position}
-              AND id != ${task.id}::uuid
+              AND position < ${currentTask.position}
+              AND id != ${currentTask.id}::uuid
           `;
-        } else if (clampedPos > task.position) {
-          // Moving down: shift items between task.position + 1 and clampedPos up (-1)
+        } else if (clampedPos > currentTask.position) {
+          // Moving down: shift items between currentTask.position + 1 and clampedPos up (-1)
           await tx.$executeRaw`
             UPDATE tasks
             SET position = position - 1, updated_at = NOW()
             WHERE column_id = ${targetColumnId}::uuid
               AND position <= ${clampedPos}
-              AND position > ${task.position}
-              AND id != ${task.id}::uuid
+              AND position > ${currentTask.position}
+              AND id != ${currentTask.id}::uuid
           `;
         }
       } else {
@@ -327,8 +346,8 @@ export class TaskService {
         await tx.$executeRaw`
           UPDATE tasks
           SET position = position - 1, updated_at = NOW()
-          WHERE column_id = ${task.columnId}::uuid
-            AND position > ${task.position}
+          WHERE column_id = ${currentTask.columnId}::uuid
+            AND position > ${currentTask.position}
         `;
 
         // Step B: Calculate clamped position in target column
@@ -394,9 +413,9 @@ export class TaskService {
         userId,
         action: 'TASK_MOVED',
         details: {
-          fromColumnId: task.columnId,
+          fromColumnId: currentTask.columnId,
           toColumnId: targetColumnId,
-          fromPosition: task.position,
+          fromPosition: currentTask.position,
           toPosition: clampedPos,
           newVersion: movedTask.version,
         },

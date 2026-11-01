@@ -101,18 +101,19 @@ export function TaskDetailsDrawer({
           description: `Update "${task.title}"`,
           taskId: task.id,
           boardId: task.boardId,
-          executeReversal: async (currentVersion) => {
+          expectedVersion: res.data.version,
+          executeReversal: async (expectedVersion) => {
             const rollbackRes = await api.put(`/tasks/${task.id}`, {
               ...previousSnapshot,
-              version: currentVersion,
+              version: expectedVersion,
             });
             onTaskUpdated(rollbackRes.data);
             return rollbackRes.data;
           },
-          executeForward: async (currentVersion) => {
+          executeForward: async (expectedVersion) => {
             const fwdRes = await api.put(`/tasks/${task.id}`, {
               ...currentMutation,
-              version: currentVersion,
+              version: expectedVersion,
             });
             onTaskUpdated(fwdRes.data);
             return fwdRes.data;

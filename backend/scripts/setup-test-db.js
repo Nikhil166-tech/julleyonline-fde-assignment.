@@ -1,11 +1,16 @@
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
 
+const baseDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/julleyonline_kanban?schema=public';
+const testDbUrl =
+  process.env.TEST_DATABASE_URL ||
+  (baseDbUrl.includes('julleyonline_kanban_test')
+    ? baseDbUrl
+    : baseDbUrl.replace(/(\/[^/?]+)(\?.*)?$/, '$1_test$2'));
+
 const devPrisma = new PrismaClient({
   datasources: {
-    db: {
-      url: 'postgresql://postgres:postgres@localhost:5433/julleyonline_kanban?schema=public',
-    },
+    db: { url: baseDbUrl },
   },
 });
 
@@ -25,7 +30,6 @@ async function main() {
 
   await devPrisma.$disconnect();
 
-  const testDbUrl = 'postgresql://postgres:postgres@localhost:5433/julleyonline_kanban_test?schema=public';
   console.log('Running Prisma migrations on test database...');
   execSync('npx prisma migrate deploy', {
     env: { ...process.env, DATABASE_URL: testDbUrl },

@@ -75,6 +75,8 @@ export function initSocketIO(httpServer) {
         return next(new Error('Authentication error: User account not found'));
       }
 
+      socket.data.user = user;
+      socket.data.userId = user.id;
       socket.user = user;
       next();
     } catch (err) {
@@ -386,13 +388,15 @@ export async function revokeUserFromTenant(tenantId, userId) {
   if (!ioInstance) return;
   const sockets = await ioInstance.fetchSockets();
   for (const s of sockets) {
-    if (s.user?.id === userId) {
+    const sUserId = s.data?.userId || s.data?.user?.id || s.user?.id;
+    if (sUserId === userId) {
       const rooms = socketRoomsMap.get(s.id) || new Set();
-      for (const roomKey of rooms) {
+      for (const roomKey of Array.from(rooms)) {
         if (roomKey === `tenant:${tenantId}` || roomKey.startsWith(`tenant:${tenantId}:`)) {
           s.leave(roomKey);
           s.emit('room:kicked', { tenantId, message: 'Your membership in this workspace has been revoked.' });
           handleLeavePresence(roomKey, userId, s.id, ioInstance);
+          rooms.delete(roomKey);
         }
       }
     }

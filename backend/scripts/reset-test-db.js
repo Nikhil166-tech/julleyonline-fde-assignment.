@@ -1,9 +1,18 @@
 import { PrismaClient } from '@prisma/client';
 
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) {
+  throw new Error('DATABASE_URL environment variable is required to run reset-test-db.js.');
+}
+
+if (!dbUrl.includes('test') && !dbUrl.includes('julleyonline_kanban_test')) {
+  throw new Error(`CRITICAL SAFETY ABORT: reset-test-db.js rejected unexpected target database: ${dbUrl}`);
+}
+
 const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: 'postgresql://postgres:postgres@localhost:5433/julleyonline_kanban_test?schema=public',
+      url: dbUrl,
     },
   },
 });
@@ -14,8 +23,7 @@ const PROTECTED_BOARD_NAMES = [
 ];
 
 async function main() {
-  const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5433/julleyonline_kanban_test?schema=public';
-  if (!dbUrl.includes('julleyonline_kanban_test')) {
+  if (!dbUrl.includes('test') && !dbUrl.includes('julleyonline_kanban_test')) {
     throw new Error(`CRITICAL SAFETY ABORT: reset-test-db.js rejected unexpected target database: ${dbUrl}`);
   }
 

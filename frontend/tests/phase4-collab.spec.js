@@ -414,4 +414,73 @@ test.describe('Phase 4: Real-Time Collaboration, Presence, Concurrency & Recover
     // Verify status returns to Live
     await expect(statusPill).toContainText('Live', { timeout: 10000 });
   });
+
+  test('COL-07: Intervening collaborator update blocks stale undo and preserves latest version', async ({
+    browser,
+  }) => {
+    const contextBob = await browser.newContext();
+    const contextCharlie = await browser.newContext();
+    const pageBob = await contextBob.newPage();
+    const pageCharlie = await contextCharlie.newPage();
+
+    try {
+      // 1. Log in Bob and Charlie to Acme Engineering
+      for (const { page, email } of [
+        { page: pageBob, email: 'bob@acme.com' },
+        { page: pageCharlie, email: 'charlie@acme.com' },
+      ]) {
+        await page.goto('/login');
+        await page.fill('input[type="email"]', email);
+        await page.fill('input[type="password"]', 'password123');
+        await page.click('button[type="submit"]');
+        await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
+        await expect(page.locator('[data-testid="connection-status-pill"]')).toContainText('Live', { timeout: 10000 });
+      }
+
+      // 2. Bob creates a task
+      const taskTitle = `Concurrency Undo Task ${Date.now()}`;
+      await pageBob.click('button:has-text("Add Task")');
+      await pageBob.fill('input[placeholder="e.g. Implement Optimistic Locking"]', taskTitle);
+      await pageBob.click('button[type="submit"]:has-text("Create Task")');
+
+      // Wait for task to be visible on both pages
+      const bobTaskCard = pageBob.locator(`text=${taskTitle}`).first();
+      const charlieTaskCard = pageCharlie.locator(`text=${taskTitle}`).first();
+      await expect(bobTaskCard).toBeVisible({ timeout: 5000 });
+      await expect(charlieTaskCard).toBeVisible({ timeout: 5000 });
+
+      // 3. Bob drags/moves the task into "In Progress" (v1 -> v2)
+      // We can also trigger the move via task drawer priority or dragging
+      await bobTaskCard.click();
+      await expect(pageBob.locator('[data-testid="task-details-drawer"]')).toBeVisible();
+      const bobPriority = pageBob.locator('[data-testid="task-details-drawer"] select').first();
+      await bobPriority.selectOption('URGENT');
+      await pageBob.waitForTimeout(600);
+
+      // Verify Bob's undo button is enabled
+      const bobUndoBtn = pageBob.locator('[data-testid="undo-btn"]');
+      await expect(bobUndoBtn).toBeEnabled({ timeout: 3000 });
+
+      // 4. Meanwhile, Charlie edits the same task in his browser (advancing version to v3)
+      await charlieTaskCard.click();
+      await expect(pageCharlie.locator('[data-testid="task-details-drawer"]')).toBeVisible();
+      const charlieDescInput = pageCharlie.locator('[data-testid="task-details-drawer"] textarea');
+      await charlieDescInput.fill('Charlie updated task details concurrently');
+      // Blur to save
+      await pageCharlie.locator('[data-testid="task-details-drawer"] input[type="text"]').first().click();
+      await pageCharlie.waitForTimeout(600);
+
+      // 5. Now Bob attempts to Undo his previous edit
+      await bobUndoBtn.click();
+      await pageBob.waitForTimeout(600);
+
+      // Verify Bob's stale undo is blocked with conflict warning banner
+      const undoBanner = pageBob.locator('[data-testid="undo-error-banner"]');
+      await expect(undoBanner).toBeVisible({ timeout: 5000 });
+      await expect(undoBanner).toContainText(/Cannot undo: Task was modified by another collaborator/i);
+    } finally {
+      await contextBob.close();
+      await contextCharlie.close();
+    }
+  });
 });

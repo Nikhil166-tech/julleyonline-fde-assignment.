@@ -28,7 +28,8 @@ export function UndoRedoProvider({ children }) {
 
   /**
    * Undo the most recent action.
-   * Treats reversal as a new authorized mutation validating current monotonic version.
+   * Concurrency Safe: Validates that the task is still at the revision produced by this action.
+   * Rejects if another collaborator (e.g. Charlie) subsequently modified the task.
    */
   const undo = useCallback(
     async (getCurrentTask) => {
@@ -44,12 +45,28 @@ export function UndoRedoProvider({ children }) {
           throw new Error('Task no longer exists on this board.');
         }
 
-        // Execute reversal with current version
-        const result = await actionToUndo.executeReversal(currentTask.version);
+        // Concurrency Guard: If another collaborator modified this task, current version > expectedVersion
+        if (actionToUndo.expectedVersion && currentTask.version !== actionToUndo.expectedVersion) {
+          const conflictErr = new Error('Cannot undo: Task was modified by another collaborator.');
+          conflictErr.statusCode = 409;
+          conflictErr.details = {
+            taskId: actionToUndo.taskId,
+            currentVersion: currentTask.version,
+            expectedVersion: actionToUndo.expectedVersion,
+          };
+          throw conflictErr;
+        }
 
-        // Move to redo stack
+        // Execute reversal passing the recorded revision produced by this action
+        const result = await actionToUndo.executeReversal(actionToUndo.expectedVersion || currentTask.version);
+
+        // Move to redo stack, recording the new version produced by this reversal
+        const redoAction = {
+          ...actionToUndo,
+          expectedVersion: result?.version,
+        };
         setUndoStack(remainingUndo);
-        setRedoStack((prev) => [actionToUndo, ...prev]);
+        setRedoStack((prev) => [redoAction, ...prev]);
 
         return result;
       } catch (err) {
@@ -71,6 +88,7 @@ export function UndoRedoProvider({ children }) {
 
   /**
    * Redo the most recently undone action.
+   * Concurrency Safe: Validates that the task is still at the revision produced by the undo action.
    */
   const redo = useCallback(
     async (getCurrentTask) => {
@@ -86,12 +104,28 @@ export function UndoRedoProvider({ children }) {
           throw new Error('Task no longer exists on this board.');
         }
 
-        // Execute forward mutation with current version
-        const result = await actionToRedo.executeForward(currentTask.version);
+        // Concurrency Guard: If another collaborator modified this task while undone
+        if (actionToRedo.expectedVersion && currentTask.version !== actionToRedo.expectedVersion) {
+          const conflictErr = new Error('Cannot redo: Task was modified by another collaborator.');
+          conflictErr.statusCode = 409;
+          conflictErr.details = {
+            taskId: actionToRedo.taskId,
+            currentVersion: currentTask.version,
+            expectedVersion: actionToRedo.expectedVersion,
+          };
+          throw conflictErr;
+        }
 
-        // Move to undo stack
+        // Execute forward mutation with recorded version
+        const result = await actionToRedo.executeForward(actionToRedo.expectedVersion || currentTask.version);
+
+        // Move to undo stack, recording the new version produced by this forward action
+        const undoAction = {
+          ...actionToRedo,
+          expectedVersion: result?.version,
+        };
         setRedoStack(remainingRedo);
-        setUndoStack((prev) => [actionToRedo, ...prev]);
+        setUndoStack((prev) => [undoAction, ...prev]);
 
         return result;
       } catch (err) {

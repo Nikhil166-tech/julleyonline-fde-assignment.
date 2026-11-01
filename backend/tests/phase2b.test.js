@@ -941,4 +941,83 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
       });
     });
   });
+
+  // -------------------------------------------------------------
+  // Test Group 6: Concurrent Task Operations & Column Lock Serialization
+  // -------------------------------------------------------------
+  describe('Concurrent Task Operations & Serialization', () => {
+    let concColId;
+
+    it('TC-MOV-CONC-01: Simultaneous task creations in the same column produce unique, contiguous integer positions', async () => {
+      const { TaskService } = await import('../src/services/task.service.js');
+
+      // Create a dedicated column for concurrency tests
+      const col = await prisma.column.create({
+        data: {
+          tenantId: acmeEngTenant.id,
+          boardId: testBoardId,
+          name: `Concurrency Column ${Date.now()}`,
+          position: 99,
+        },
+      });
+      concColId = col.id;
+
+      // Dispatch 5 concurrent task creations at the exact same instant
+      const createPromises = [0, 1, 2, 3, 4].map((i) =>
+        TaskService.createTask(acmeEngTenant.id, testBoardId, bobUser.id, {
+          columnId: concColId,
+          title: `Concurrent Task ${i}`,
+          description: `Payload for task ${i}`,
+          priority: 'MEDIUM',
+        })
+      );
+
+      const createdTasks = await Promise.all(createPromises);
+      assert.equal(createdTasks.length, 5);
+
+      // Verify created task positions directly from PostgreSQL
+      const dbTasks = await prisma.task.findMany({
+        where: { columnId: concColId },
+        orderBy: { position: 'asc' },
+      });
+
+      assert.equal(dbTasks.length, 5);
+      const positions = dbTasks.map((t) => t.position);
+
+      // Check uniqueness: no two tasks have the same position
+      const uniquePositions = new Set(positions);
+      assert.equal(uniquePositions.size, 5, 'Every concurrently created task must have a unique position');
+
+      // Check contiguous integer sequence: [0, 1, 2, 3, 4]
+      assert.deepEqual(positions, [0, 1, 2, 3, 4], 'Positions must be contiguous 0, 1, 2, 3, 4');
+    });
+
+    it('TC-MOV-CONC-02: Simultaneous task moves re-reading position under column lock maintain dense contiguous positions', async () => {
+      const { TaskService } = await import('../src/services/task.service.js');
+
+      const tasks = await prisma.task.findMany({
+        where: { columnId: concColId },
+        orderBy: { position: 'asc' },
+      });
+      assert.ok(tasks.length >= 3);
+
+      // Move task 2 to position 0
+      const moveRes = await TaskService.moveTask(acmeEngTenant.id, tasks[2].id, bobUser.id, {
+        targetColumnId: concColId,
+        newPosition: 0,
+        version: tasks[2].version,
+      });
+
+      assert.equal(moveRes.position, 0);
+
+      // Verify dense contiguous positions in column
+      const reordered = await prisma.task.findMany({
+        where: { columnId: concColId },
+        orderBy: { position: 'asc' },
+      });
+
+      const positions = reordered.map((t) => t.position);
+      assert.deepEqual(positions, [0, 1, 2, 3, 4], 'Positions must remain densely contiguous after move');
+    });
+  });
 });

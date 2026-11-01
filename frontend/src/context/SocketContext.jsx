@@ -12,6 +12,7 @@ export function SocketProvider({ children }) {
   const [activeTenantUsers, setActiveTenantUsers] = useState([]);
   const activeRoomRef = useRef(null);
   const activeTenantRef = useRef(null);
+  const joinedTenantIdRef = useRef(null);
   const processedEventsRef = useRef(new Set());
   const reconnectListenersRef = useRef(new Set());
 
@@ -125,14 +126,50 @@ export function SocketProvider({ children }) {
     };
   }, [token, isAuthenticated]);
 
-  // Synchronize tenant workspace room when activeTenant changes
+  // Cleanly synchronize tenant workspace room when activeTenant changes
   useEffect(() => {
-    if (!socket || !socket.connected || !activeTenant?.id) return;
+    if (!socket || !socket.connected) return;
+
+    // 1. If currently joined to a different tenant workspace, leave it cleanly
+    if (joinedTenantIdRef.current && joinedTenantIdRef.current !== activeTenant?.id) {
+      socket.emit('leave:tenant', { tenantId: joinedTenantIdRef.current });
+      joinedTenantIdRef.current = null;
+      setActiveTenantUsers([]);
+    }
+
+    // 2. If changing tenant, also leave any board room tied to the previous tenant
+    if (activeRoomRef.current && activeRoomRef.current.tenantId !== activeTenant?.id) {
+      socket.emit('leave:board', {
+        tenantId: activeRoomRef.current.tenantId,
+        boardId: activeRoomRef.current.boardId,
+      });
+      activeRoomRef.current = null;
+      setActiveUsers([]);
+    }
+
+    if (!activeTenant?.id) {
+      setActiveTenantUsers([]);
+      return;
+    }
+
+    // 3. Clear previous tenant presence while switching to prevent stale UI
+    setActiveTenantUsers([]);
+    joinedTenantIdRef.current = activeTenant.id;
+
+    // 4. Join the new tenant workspace room
     socket.emit('join:tenant', { tenantId: activeTenant.id }, (res) => {
       if (res?.activeUsers) {
         setActiveTenantUsers(res.activeUsers);
       }
     });
+
+    return () => {
+      if (socket.connected && joinedTenantIdRef.current) {
+        socket.emit('leave:tenant', { tenantId: joinedTenantIdRef.current });
+        joinedTenantIdRef.current = null;
+        setActiveTenantUsers([]);
+      }
+    };
   }, [socket, activeTenant?.id]);
 
   // Join a board room

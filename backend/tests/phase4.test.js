@@ -14,8 +14,11 @@ describe('Phase 4: Real-Time Collaboration, Socket.IO & Presence Test Suite', ()
   // Cached personas & tokens
   let acmeOrg;
   let acmeEngTenant;
+  let acmeMktgTenant;
   let nexusOrg;
   let nexusOpsTenant;
+  let aliceToken; // Org Admin in Acme
+  let aliceUser;
   let bobToken; // Tenant Admin in Engineering
   let charlieToken; // Member in Engineering
   let dianaToken; // Org Admin in Nexus (cross-org)
@@ -60,6 +63,9 @@ describe('Phase 4: Real-Time Collaboration, Socket.IO & Presence Test Suite', ()
     acmeEngTenant = await prisma.tenant.findFirst({
       where: { orgId: acmeOrg.id, slug: 'engineering' },
     });
+    acmeMktgTenant = await prisma.tenant.findFirst({
+      where: { orgId: acmeOrg.id, slug: 'marketing' },
+    });
     nexusOrg = await prisma.organization.findUnique({ where: { slug: 'nexus-global' } });
     nexusOpsTenant = await prisma.tenant.findFirst({
       where: { orgId: nexusOrg.id, slug: 'operations' },
@@ -75,6 +81,10 @@ describe('Phase 4: Real-Time Collaboration, Socket.IO & Presence Test Suite', ()
       const data = await res.json();
       return { token: data.data.token, user: data.data.user };
     };
+
+    const aliceData = await loginUser('alice@acme.com');
+    aliceToken = aliceData.token;
+    aliceUser = aliceData.user;
 
     const bobData = await loginUser('bob@acme.com');
     bobToken = bobData.token;
@@ -341,6 +351,138 @@ describe('Phase 4: Real-Time Collaboration, Socket.IO & Presence Test Suite', ()
 
       assert.equal(res.status, 200);
       await eventPromise;
+    });
+  });
+
+  describe('WebSocket Revocation & Tenant Room Switching', () => {
+    it('TC-SCK-10: Immediate WebSocket revocation when member is removed from tenant workspace', async () => {
+      // 1. Create a dynamic test user and add as member to Acme Engineering
+      const tempEmail = `revoked_${Date.now()}@acme.com`;
+      const registerRes = await fetch(`${baseUrl}/api/v1/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Revoked Member',
+          email: tempEmail,
+          password: 'password123',
+          organizationName: `Org ${Date.now()}`,
+        }),
+      });
+      assert.equal(registerRes.status, 201);
+      const regData = await registerRes.json();
+      const tempUserToken = regData.data.token;
+      const tempUserId = regData.data.user.id;
+
+      // Add user to Acme Engineering workspace
+      const addRes = await fetch(`${baseUrl}/api/v1/tenants/${acmeEngTenant.id}/members`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: tempEmail,
+          role: 'MEMBER',
+        }),
+      });
+      assert.equal(addRes.status, 201);
+      const addData = await addRes.json();
+      const membershipId = addData.data.membershipId;
+
+      // 2. Connect user's WebSocket and join both workspace and board rooms
+      const tempSocket = await connectSocket(tempUserToken);
+      let kickedReceived = false;
+      tempSocket.on('room:kicked', (payload) => {
+        if (payload.tenantId === acmeEngTenant.id) {
+          kickedReceived = true;
+        }
+      });
+
+      let broadcastAfterRevocationReceived = false;
+      tempSocket.on('task:created', () => {
+        broadcastAfterRevocationReceived = true;
+      });
+
+      await new Promise((resolve) => {
+        tempSocket.emit('join:board', { tenantId: acmeEngTenant.id, boardId: testBoard.id }, resolve);
+      });
+      await new Promise((resolve) => {
+        tempSocket.emit('join:tenant', { tenantId: acmeEngTenant.id }, resolve);
+      });
+
+      // 3. Admin removes member from tenant workspace
+      const deleteMemberRes = await fetch(
+        `${baseUrl}/api/v1/tenants/${acmeEngTenant.id}/members/${membershipId}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${aliceToken}` },
+        }
+      );
+      assert.equal(deleteMemberRes.status, 200);
+
+      // Wait 150ms for socket revocation message propagation
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      assert.ok(kickedReceived, 'Socket must receive room:kicked event on membership deletion');
+
+      // 4. Now perform a board broadcast via REST
+      const taskRes = await fetch(`${baseUrl}/api/v1/boards/${testBoard.id}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${aliceToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({
+          columnId: testColumn.id,
+          title: 'Post-Revocation Broadcast Test Task',
+        }),
+      });
+      assert.equal(taskRes.status, 201);
+
+      // Wait 150ms to ensure no broadcast is delivered to revoked user
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      assert.equal(
+        broadcastAfterRevocationReceived,
+        false,
+        'Revoked member socket must NOT receive broadcasts after membership is removed'
+      );
+
+      tempSocket.disconnect();
+    });
+
+    it('TC-SCK-11: Tenant Room Switching cleanly leaves old room and isolates events', async () => {
+      const aliceSocket = await connectSocket(aliceToken);
+      let tenant1EventReceived = false;
+      let tenant2EventReceived = false;
+
+      aliceSocket.on('tenant:event', (payload) => {
+        if (payload.tenantId === acmeEngTenant.id) tenant1EventReceived = true;
+        if (payload.tenantId === acmeMktgTenant.id) tenant2EventReceived = true;
+      });
+
+      // Join Tenant 1
+      await new Promise((resolve) => {
+        aliceSocket.emit('join:tenant', { tenantId: acmeEngTenant.id }, resolve);
+      });
+
+      // Switch to Tenant 2: Leave Tenant 1, Join Tenant 2
+      aliceSocket.emit('leave:tenant', { tenantId: acmeEngTenant.id });
+      await new Promise((resolve) => {
+        aliceSocket.emit('join:tenant', { tenantId: acmeMktgTenant.id }, resolve);
+      });
+
+      // Broadcast to Tenant 1 (should NOT be received by Alice)
+      const { broadcastToTenant } = await import('../src/socket/index.js');
+      broadcastToTenant(acmeEngTenant.id, 'tenant:event', { tenantId: acmeEngTenant.id });
+
+      // Broadcast to Tenant 2 (SHOULD be received by Alice)
+      broadcastToTenant(acmeMktgTenant.id, 'tenant:event', { tenantId: acmeMktgTenant.id });
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      assert.equal(tenant1EventReceived, false, 'Should not receive events from old tenant room after leaving');
+      assert.equal(tenant2EventReceived, true, 'Should receive events from active tenant room');
+
+      aliceSocket.disconnect();
     });
   });
 });

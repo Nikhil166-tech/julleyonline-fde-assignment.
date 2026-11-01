@@ -62,7 +62,7 @@ JulleyOnline is a production-grade, multi-tenant SaaS Kanban project management 
 
 ## Multi-Tenancy & Security Boundaries
 
-For the complete PostgreSQL entity-relationship specification, constraints, and relational mappings, see [Database ER Diagram & Architecture Specification](file:///c:/projects/julleyonline-fde-assignment/docs/er-diagram.md).
+For the complete PostgreSQL entity-relationship specification, constraints, and relational mappings, see [Database ER Diagram & Architecture Specification](docs/er-diagram.md).
 
 JulleyOnline enforces a two-tier multi-tenancy model:
 
@@ -90,7 +90,7 @@ erDiagram
 
 3. **Tenant-Scoped Authorization Middleware:**
    - Every protected API request requires an `X-Tenant-ID` header alongside the `Authorization: Bearer <token>`.
-   - The [`tenantScope`](file:///c:/projects/julleyonline-fde-assignment/backend/src/middlewares/tenantScope.js) middleware validates that the authenticated user holds an active membership in the specified tenant and verifies that the tenant belongs to the authorized organization.
+   - The [`tenant.middleware.js`](backend/src/middlewares/tenant.middleware.js) middleware validates that the authenticated user holds an active membership in the specified tenant and verifies that the tenant belongs to the authorized organization.
 
 ---
 
@@ -144,7 +144,7 @@ In high-concurrency collaborative environments, the "last write wins" pattern ca
      }
    }
    ```
-4. **Interactive Conflict Modal:** The React frontend renders the [`ConflictModal`](file:///c:/projects/julleyonline-fde-assignment/frontend/src/components/modals/ConflictModal.jsx) displaying a visual side-by-side diff (your uncommitted edits vs the server's authoritative version) and offers a one-click **"Accept Server State & Refresh"** button.
+4. **Interactive Conflict Modal:** The React frontend renders the [`ConflictModal`](frontend/src/components/modals/ConflictModal.jsx) displaying a visual side-by-side diff (your uncommitted edits vs the server's authoritative version) and offers a one-click **"Accept Server State & Refresh"** button.
 
 ### Integer-Based Contiguous Task Ordering
 
@@ -175,7 +175,7 @@ Attached directly to the Node.js HTTP server via **Socket.IO** (`backend/src/soc
 
 ## Undo / Redo Architecture
 
-Implemented in [`frontend/src/context/UndoRedoContext.jsx`](file:///c:/projects/julleyonline-fde-assignment/frontend/src/context/UndoRedoContext.jsx):
+Implemented in [`frontend/src/context/UndoRedoContext.jsx`](frontend/src/context/UndoRedoContext.jsx):
 
 - **Command Pattern Stack:** Maintains a bounded history stack (up to 30 actions) of reversible actions: `TASK_MOVE`, `TASK_UPDATE`, `TASK_CREATE`, and `TASK_DELETE`.
 - **Keyboard Shortcuts:** `Ctrl+Z` (or `Cmd+Z`) triggers Undo; `Ctrl+Y` (or `Cmd+Shift+Z`) triggers Redo.
@@ -211,7 +211,7 @@ High-fidelity screenshots captured directly from the running application:
 ### 1. Repository Setup
 
 ```bash
-git clone https://github.com/organization/julleyonline-fde-assignment.git
+git clone https://github.com/Nikhil166-tech/julleyonline-fde-assignment..git
 cd julleyonline-fde-assignment
 ```
 
@@ -221,14 +221,15 @@ cd julleyonline-fde-assignment
 cd backend
 pnpm install
 
-# Copy configuration template
+# Copy configuration templates
 cp .env.example .env
+cp .env.test.example .env.test
 
-# Run Prisma database migrations and seed baseline data
-npx prisma migrate dev --name init
-node prisma/seed.js
+# Run Prisma database migrations and seed baseline development data
+npx prisma migrate deploy
+pnpm run prisma:seed
 
-# Provision isolated test database
+# Provision and seed isolated test database
 node scripts/setup-test-db.js
 ```
 
@@ -264,7 +265,7 @@ Password for all pre-seeded accounts: **`password123`**
 
 | Persona | Email | Organization | Tenant Workspace | Assigned Role | Primary Capabilities |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Alice Smith** | `alice@acme.com` | Acme Technologies | Engineering & Product | **Org Admin** | Full access to Acme; tenant creation, org settings. |
+| **Alice Smith** | `alice@acme.com` | Acme Technologies | Engineering & Product | **Org Admin** | Full access to Acme; tenant creation, org settings, safe deletion. |
 | **Bob Smith** | `bob@acme.com` | Acme Technologies | Engineering & Product | **Tenant Admin** | Admin in Engineering; Member in Marketing. |
 | **Charlie Brown** | `charlie@acme.com` | Acme Technologies | Engineering & Product | **Member** | Task CRUD & movement; cannot create boards or columns. |
 | **Diana Prince** | `diana@nexus.com` | Nexus Global | Operations & Fleet | **Org Admin** | Cross-org isolation proof (cannot access any Acme data). |
@@ -274,9 +275,9 @@ Password for all pre-seeded accounts: **`password123`**
 
 ## Test Suite and Verification Evidence
 
-JulleyOnline includes **107 fully automated positive, negative, security, and concurrency tests**:
+JulleyOnline includes **118 fully automated positive, negative, security, and concurrency tests**:
 
-### Running Backend Tests (91 Tests)
+### Running Backend Tests (101 Tests)
 
 ```bash
 cd backend
@@ -286,11 +287,11 @@ pnpm test
 
 - **Phase 1A: Backend Foundation (8 tests):** Config validation, health check, custom domain error handlers.
 - **Phase 1B: Authentication & RBAC (26 tests):** Registration atomicity, bcrypt hashing, JWT tampering, dynamic membership revocation.
-- **Phase 2A: Organization & Tenant Management (21 tests):** Workspace CRUD, last Org Admin deletion safety, membership assignment.
-- **Phase 2B: Boards, Columns & OCC (27 tests):** Board CRUD, integer task reordering, OCC version incrementing, HTTP 409 conflict contract, transaction rollback on failure.
-- **Phase 4: Socket.IO & Collaboration (9 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts.
+- **Phase 2A: Organization & Tenant Management (27 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit.
+- **Phase 2B: Boards, Columns & OCC (29 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, HTTP 409 conflict contract, concurrent creation serialization.
+- **Phase 4: Socket.IO & Collaboration (11 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts, immediate WebSocket revocation, tenant room switching.
 
-### Running Frontend Playwright Tests (16 Tests)
+### Running Frontend Playwright Tests (17 Tests)
 
 ```bash
 cd frontend
@@ -299,7 +300,7 @@ npx playwright test tests/board-selector.spec.js tests/e2e.spec.js tests/phase4-
 
 - **Board Selector & Search (`board-selector.spec.js` - 6 tests):** Real-time search by name/short ID, multiple boards with identical names, tenant isolation, RBAC controls.
 - **End-to-End Real Persistence (`e2e.spec.js` - 4 tests):** Login session hydration, Board/Task CRUD persistence across reloads, non-empty column deletion policy, Member RBAC boundary.
-- **Real-Time Collaboration & Concurrency (`phase4-collab.spec.js` - 6 tests):** Multi-user room presence pill, real-time task creation/movement broadcast, HTTP 409 conflict modal reconciliation, Undo/Redo OCC validation, socket reconnection recovery.
+- **Real-Time Collaboration & Concurrency (`phase4-collab.spec.js` - 7 tests):** Multi-user room presence pill, real-time task creation/movement broadcast, HTTP 409 conflict modal reconciliation, Undo/Redo OCC validation, socket reconnection recovery, multi-collaborator undo rejection.
 
 ---
 
@@ -310,11 +311,11 @@ npx playwright test tests/board-selector.spec.js tests/e2e.spec.js tests/phase4-
    - *Rationale:* Kanban task management is card-level transactional, not character-by-character collaborative text editing. OCC guarantees atomic database consistency, avoids complex distributed conflict resolution algorithms, and gives users transparent choice when conflicts occur.
 
 2. **Contiguous Integer Ordering vs. Floating-Point / Lexorank Ordering:**
-   - *Decision:* Transactional contiguous integer position shifting (`0, 1, 2, ... N-1`).
-   - *Rationale:* Floating-point and fractional string (Lexorank) indexing suffer from precision exhaustion after repeated drops and require complex asynchronous rebalancing jobs. PostgreSQL row-level locks within transactions guarantee strict deterministic order without decimal degradation.
+   - *Decision:* Transactional contiguous integer position shifting (`0, 1, 2, ... N-1`) serialized under PostgreSQL row locks.
+   - *Rationale:* Floating-point and fractional string (Lexorank) indexing suffer from precision exhaustion after repeated drops and require complex asynchronous rebalancing jobs. PostgreSQL column-level row locks within transactions guarantee strict deterministic order without decimal degradation.
 
 3. **In-Memory Socket.IO Rooms vs. Redis Pub/Sub Cluster:**
-   - *Decision:* Process-attached Socket.IO rooms with multi-tab connection maps.
+   - *Decision:* Process-attached Socket.IO rooms with multi-tab connection maps and supported `socket.data` identity storage.
    - *Rationale:* Optimized for single-server zero-dependency local deployment and rapid development without requiring Redis infrastructure. Can be scaled horizontally by plugging in `@socket.io/redis-adapter` without changing application business logic.
 
 ---
@@ -330,10 +331,15 @@ Comprehensive API specifications are documented in [`docs/api-documentation.md`]
 | `POST` | `/api/v1/auth/register` | Register new organization & initial Org Admin | No |
 | `POST` | `/api/v1/auth/login` | Authenticate user; returns JWT & memberships | No |
 | `POST` | `/api/v1/auth/switch-context`| Switch active tenant workspace | Bearer JWT |
+| `POST` | `/api/v1/organizations` | Create a new organization with default workspace | Bearer JWT |
+| `DELETE`| `/api/v1/organizations/:id` | Delete organization (requires `?force=true` if active) | Org Admin |
+| `POST` | `/api/v1/organizations/:id/tenants` | Create tenant workspace | Org Admin |
+| `DELETE`| `/api/v1/tenants/:id` | Delete tenant workspace (requires `?force=true` if active) | Org Admin |
+| `GET` | `/api/v1/tenants/:id/activities` | Tenant workspace-wide activity audit trail | Bearer + Tenant |
 | `GET` | `/api/v1/boards` | List boards for active tenant | Bearer + Tenant |
 | `POST` | `/api/v1/boards` | Create a new board with default columns | Admin only |
 | `GET` | `/api/v1/boards/:id` | Authoritative snapshot of board, columns, tasks | Bearer + Tenant |
-| `POST` | `/api/v1/columns/:id/tasks` | Create task in column (Zod validated) | Bearer + Tenant |
+| `POST` | `/api/v1/columns/:id/tasks` | Create task in column (serialized under column lock) | Bearer + Tenant |
 | `PATCH`| `/api/v1/tasks/:id` | Update task fields (requires `version` for OCC) | Bearer + Tenant |
 | `POST` | `/api/v1/tasks/:id/move` | Move task position / column (atomic transaction) | Bearer + Tenant |
 | `DELETE`|`/api/v1/columns/:id` | Delete column (rejected if column has tasks) | Admin only |

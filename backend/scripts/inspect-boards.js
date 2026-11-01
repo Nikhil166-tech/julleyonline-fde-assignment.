@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 
 const targetDbUrl =
   process.env.DATABASE_URL ||
-  'postgresql://postgres:postgres@localhost:5433/julleyonline_kanban?schema=public';
+  'postgresql://postgres:postgres@localhost:5432/julleyonline_kanban?schema=public';
 
 const prisma = new PrismaClient({
   datasources: {
