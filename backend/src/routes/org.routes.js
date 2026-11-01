@@ -5,6 +5,7 @@ import { MembershipService } from '../services/membership.service.js';
 import { authenticateToken } from '../middlewares/auth.middleware.js';
 import { requireOrgContext, requireOrgAdmin } from '../middlewares/org.middleware.js';
 import {
+  createOrgSchema,
   createTenantSchema,
   updateOrgSchema,
 } from '../validators/org.validator.js';
@@ -21,6 +22,20 @@ router.get('/', async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: orgs,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/v1/organizations - Create a new organization
+router.post('/', async (req, res, next) => {
+  try {
+    const validatedData = createOrgSchema.parse(req.body);
+    const org = await OrgService.createOrganization(req.user.id, validatedData);
+    res.status(201).json({
+      success: true,
+      data: org,
     });
   } catch (error) {
     next(error);
@@ -57,7 +72,8 @@ router.patch('/:orgId', requireOrgContext, requireOrgAdmin, async (req, res, nex
 // DELETE /api/v1/organizations/:orgId - Delete organization (strictly Org Admin)
 router.delete('/:orgId', requireOrgContext, requireOrgAdmin, async (req, res, next) => {
   try {
-    const result = await OrgService.deleteOrganization(req.orgId, req.user.id);
+    const force = req.query.force === 'true';
+    const result = await OrgService.deleteOrganization(req.orgId, req.user.id, { force });
     res.status(200).json(result);
   } catch (error) {
     next(error);

@@ -9,9 +9,16 @@ export function SocketProvider({ children }) {
   const [socket, setSocket] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected'); // 'connected' | 'reconnecting' | 'disconnected'
   const [activeUsers, setActiveUsers] = useState([]);
+  const [activeTenantUsers, setActiveTenantUsers] = useState([]);
   const activeRoomRef = useRef(null);
+  const activeTenantRef = useRef(null);
   const processedEventsRef = useRef(new Set());
   const reconnectListenersRef = useRef(new Set());
+
+  // Keep activeTenantRef synchronized
+  useEffect(() => {
+    activeTenantRef.current = activeTenant;
+  }, [activeTenant]);
 
   // Connect / Disconnect socket when authentication state changes
   useEffect(() => {
@@ -43,6 +50,15 @@ export function SocketProvider({ children }) {
 
     newSocket.on('connect', () => {
       setConnectionStatus('connected');
+
+      // Join tenant room on connect
+      if (activeTenantRef.current?.id) {
+        newSocket.emit('join:tenant', { tenantId: activeTenantRef.current.id }, (res) => {
+          if (res?.activeUsers) {
+            setActiveTenantUsers(res.activeUsers);
+          }
+        });
+      }
 
       // If already tracking an active board room, re-join on reconnect
       if (activeRoomRef.current) {
@@ -87,9 +103,16 @@ export function SocketProvider({ children }) {
       }
     });
 
+    newSocket.on('tenant:presence:sync', (payload) => {
+      if (payload?.activeUsers) {
+        setActiveTenantUsers(payload.activeUsers);
+      }
+    });
+
     newSocket.on('room:kicked', (payload) => {
       console.warn('[Socket] Kicked from room:', payload.message);
       setActiveUsers([]);
+      setActiveTenantUsers([]);
       activeRoomRef.current = null;
     });
 
@@ -98,8 +121,19 @@ export function SocketProvider({ children }) {
       setSocket(null);
       setConnectionStatus('disconnected');
       setActiveUsers([]);
+      setActiveTenantUsers([]);
     };
   }, [token, isAuthenticated]);
+
+  // Synchronize tenant workspace room when activeTenant changes
+  useEffect(() => {
+    if (!socket || !socket.connected || !activeTenant?.id) return;
+    socket.emit('join:tenant', { tenantId: activeTenant.id }, (res) => {
+      if (res?.activeUsers) {
+        setActiveTenantUsers(res.activeUsers);
+      }
+    });
+  }, [socket, activeTenant?.id]);
 
   // Join a board room
   const joinBoard = useCallback(
@@ -159,6 +193,7 @@ export function SocketProvider({ children }) {
     socket,
     connectionStatus,
     activeUsers,
+    activeTenantUsers,
     joinBoard,
     leaveBoard,
     onReconnectResync,

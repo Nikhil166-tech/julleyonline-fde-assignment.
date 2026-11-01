@@ -62,6 +62,8 @@ JulleyOnline is a production-grade, multi-tenant SaaS Kanban project management 
 
 ## Multi-Tenancy & Security Boundaries
 
+For the complete PostgreSQL entity-relationship specification, constraints, and relational mappings, see [Database ER Diagram & Architecture Specification](file:///c:/projects/julleyonline-fde-assignment/docs/er-diagram.md).
+
 JulleyOnline enforces a two-tier multi-tenancy model:
 
 ```mermaid

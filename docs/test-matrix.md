@@ -150,6 +150,26 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `TC-SCK-08` | Real-time Broadcast | REST task move broadcasts `task:moved` with targetColumnId and version 3 | **PASS** |
 | `TC-SCK-09` | Real-time Broadcast | REST task deletion broadcasts `task:deleted` with taskId | **PASS** |
 
+### Advanced Org/Tenant CRUD & Safe Deletion Tests (`tests/phase2a.test.js`)
+| Test ID | Category | Scenario / Assertion | Status |
+| :--- | :--- | :--- | :--- |
+| `TC-CRUD-01` | Org CRUD | Authenticated user creates a new Organization via `POST /api/v1/organizations` | **PASS** |
+| `TC-CRUD-02` | Safe Deletion | Tenant workspace containing active boards/tasks rejected with `400 Bad Request` without `?force=true` | **PASS** |
+| `TC-CRUD-03` | Safe Deletion | Organization containing active workspaces/boards rejected with `400 Bad Request` without `?force=true` | **PASS** |
+| `TC-CRUD-04` | Force Deletion | Tenant workspace permanently deleted with `?force=true` by authorized Org Admin | **PASS** |
+| `TC-CRUD-05` | Workspace Activities | `GET /api/v1/tenants/:id/activities` returns workspace audit trail & denies cross-tenant access | **PASS** |
+| `TC-CRUD-06` | Force Deletion | Organization permanently deleted with `?force=true` by authorized Org Admin | **PASS** |
+
+### Board Selector & Tenant Isolation Playwright Regression Tests (`tests/board-selector.spec.js`)
+| Test ID | Category | Scenario / Assertion | Status |
+| :--- | :--- | :--- | :--- |
+| `SEL-01` | Board Selector | Renders active board, count badge, and opens searchable dropdown | **PASS** |
+| `SEL-02` | Board Search | Live search filtering works dynamically by board name and short `#<id8>` ID | **PASS** |
+| `SEL-03` | Board Switching | Board selection loads correct columns, tasks, and updates URL query param | **PASS** |
+| `SEL-04` | Identical Names | Support for multiple boards with identical names via distinct short IDs | **PASS** |
+| `SEL-05` | Tenant Isolation | Tenant switching strictly scopes board selector and prevents cross-tenant UI bleed | **PASS** |
+| `SEL-06` | RBAC Visibility | Create Board action in BoardSelector visible for Admins and hidden for Members | **PASS** |
+
 ### Two-Browser Multi-User Playwright End-to-End Collaboration Tests (`tests/phase4-collab.spec.js`)
 | Test ID | Category | Multi-User Scenario / Verification | Status |
 | :--- | :--- | :--- | :--- |
@@ -160,4 +180,4 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `COL-05` | Undo/Redo OCC | Bob modifies task, clicks Undo $\to$ reverts; clicks Redo $\to$ restores; OCC protects against collaborator collision | **PASS** |
 | `COL-06` | Network Recovery | Disconnecting socket updates status to disconnected; on reconnect, auto-rejoins room and refetches snapshot | **PASS** |
 
-**Total Automated Suite**: 91 Backend Unit & Integration Tests (100% pass) + 10 Playwright End-to-End Tests (100% pass) + Automated Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.
+**Total Automated Suite**: 97 Backend Unit & Integration Tests (100% pass) + 16 Playwright End-to-End Tests (100% pass) + Automated Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.

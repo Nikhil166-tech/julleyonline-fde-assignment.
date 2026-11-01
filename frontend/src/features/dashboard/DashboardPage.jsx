@@ -676,7 +676,8 @@ export function DashboardPage() {
       if (err.statusCode === 409) {
         setConflictDetails(err.details);
       } else {
-        alert(err.message || 'Failed to move task');
+        setError(err.message || 'Failed to move task. Reverted changes to original state.');
+        setTimeout(() => setError(''), 6000);
       }
     }
   };
@@ -844,6 +845,25 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Operation Error Banner */}
+      {error && (
+        <div
+          data-testid="operation-error-banner"
+          className="bg-rose-50 border-b border-rose-200 px-6 py-2.5 text-xs text-rose-800 flex items-center justify-between animate-fadeIn"
+        >
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="font-medium">{error}</span>
+          </div>
+          <button
+            onClick={() => setError('')}
+            className="text-rose-600 hover:text-rose-800 text-xs font-semibold px-2 py-0.5 rounded hover:bg-rose-100 transition-colors cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Undo Error Banner */}
       {undoError && (

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { TenantService } from '../services/tenant.service.js';
 import { MembershipService } from '../services/membership.service.js';
+import { ActivityService } from '../services/activity.service.js';
 import { authenticateToken } from '../middlewares/auth.middleware.js';
 import { prisma } from '../config/prisma.js';
 import { revokeUserFromTenant } from '../socket/index.js';
@@ -45,8 +46,28 @@ router.patch('/:tenantId', async (req, res, next) => {
 // DELETE /api/v1/tenants/:tenantId - Delete tenant workspace (strictly Org Admin)
 router.delete('/:tenantId', async (req, res, next) => {
   try {
-    const result = await TenantService.deleteTenant(req.params.tenantId, req.user.id);
+    const force = req.query.force === 'true';
+    const result = await TenantService.deleteTenant(req.params.tenantId, req.user.id, { force });
     res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/v1/tenants/:tenantId/activities - Get activity logs for the tenant workspace
+router.get('/:tenantId/activities', async (req, res, next) => {
+  try {
+    // Verify membership & access to tenant
+    await TenantService.getTenant(req.params.tenantId, req.user.id);
+    const { boardId, limit } = req.query;
+    const activities = await ActivityService.getTenantActivities(req.params.tenantId, {
+      boardId: boardId || undefined,
+      limit: limit ? parseInt(limit, 10) : 50,
+    });
+    res.status(200).json({
+      success: true,
+      data: activities,
+    });
   } catch (error) {
     next(error);
   }

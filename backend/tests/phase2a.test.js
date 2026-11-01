@@ -532,4 +532,122 @@ describe('Phase 2A: Organization, Tenant and Membership Management Test Suite', 
       assert.equal(data.error.code, 'FORBIDDEN');
     });
   });
+
+  // -------------------------------------------------------------
+  // Test Group 6: Advanced CRUD, Safe Deletion & Workspace Activities
+  // -------------------------------------------------------------
+  describe('Advanced Org/Tenant CRUD & Safe Deletion Policy', () => {
+    let createdOrgId;
+    let createdTenantId;
+
+    it('TC-CRUD-01: Authenticated user creates a new Organization via POST /api/v1/organizations', async () => {
+      const orgName = `Dynamic Startup ${Date.now()}`;
+      const res = await fetch(`${baseUrl}/api/v1/organizations`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: orgName }),
+      });
+
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.ok(data.data.id);
+      assert.equal(data.data.name, orgName);
+      assert.ok(data.data.tenants?.length > 0, 'Default workspace created');
+
+      createdOrgId = data.data.id;
+      createdTenantId = data.data.tenants[0].id;
+    });
+
+    it('TC-CRUD-02: Tenant workspace with active boards cannot be deleted without ?force=true (400 Bad Request)', async () => {
+      // Create a test board in the newly created tenant
+      const boardRes = await fetch(`${baseUrl}/api/v1/boards`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+          'X-Tenant-ID': createdTenantId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'Active Project Board' }),
+      });
+      assert.equal(boardRes.status, 201);
+
+      // Attempt deletion without force
+      const deleteRes = await fetch(`${baseUrl}/api/v1/tenants/${createdTenantId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+          'X-Tenant-ID': createdTenantId,
+        },
+      });
+
+      assert.equal(deleteRes.status, 400);
+      const deleteData = await deleteRes.json();
+      assert.equal(deleteData.error.code, 'BAD_REQUEST');
+      assert.match(deleteData.error.message, /Cannot delete tenant workspace containing active resources/);
+    });
+
+    it('TC-CRUD-03: Organization with active tenants cannot be deleted without ?force=true (400 Bad Request)', async () => {
+      // Attempt deletion of created organization without force
+      const deleteRes = await fetch(`${baseUrl}/api/v1/organizations/${createdOrgId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+        },
+      });
+
+      assert.equal(deleteRes.status, 400);
+      const deleteData = await deleteRes.json();
+      assert.equal(deleteData.error.code, 'BAD_REQUEST');
+      assert.match(deleteData.error.message, /Cannot delete organization containing active resources/);
+    });
+
+    it('TC-CRUD-04: Tenant workspace can be permanently deleted with ?force=true by Org Admin', async () => {
+      const deleteRes = await fetch(`${baseUrl}/api/v1/tenants/${createdTenantId}?force=true`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+        },
+      });
+
+      assert.equal(deleteRes.status, 200);
+      const data = await deleteRes.json();
+      assert.equal(data.success, true);
+    });
+
+    it('TC-CRUD-05: GET /api/v1/tenants/:tenantId/activities returns workspace activities and denies cross-tenant access', async () => {
+      // 1. Authorized access (Alice accesses Acme Engineering activities)
+      const resAuth = await fetch(`${baseUrl}/api/v1/tenants/${acmeEngTenant.id}/activities`, {
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      });
+      assert.equal(resAuth.status, 200);
+      const dataAuth = await resAuth.json();
+      assert.equal(dataAuth.success, true);
+      assert.ok(Array.isArray(dataAuth.data));
+
+      // 2. Cross-tenant unauthorized access (Diana from Nexus attempts accessing Acme activities)
+      const resUnauth = await fetch(`${baseUrl}/api/v1/tenants/${acmeEngTenant.id}/activities`, {
+        headers: { Authorization: `Bearer ${dianaToken}` },
+      });
+      assert.equal(resUnauth.status, 403);
+      const dataUnauth = await resUnauth.json();
+      assert.equal(dataUnauth.error.code, 'FORBIDDEN');
+    });
+
+    it('TC-CRUD-06: Organization can be deleted with ?force=true by Org Admin', async () => {
+      const deleteRes = await fetch(`${baseUrl}/api/v1/organizations/${createdOrgId}?force=true`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+        },
+      });
+
+      assert.equal(deleteRes.status, 200);
+      const data = await deleteRes.json();
+      assert.equal(data.success, true);
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import { prisma } from '../config/prisma.js';
-import { ConflictError, NotFoundError, ForbiddenError } from '../errors/AppError.js';
+import { ConflictError, NotFoundError, ForbiddenError, BadRequestError } from '../errors/AppError.js';
 import { Role } from '@prisma/client';
 
 function slugify(text) {
@@ -184,8 +184,9 @@ export class TenantService {
 
   /**
    * Delete tenant workspace (strictly Org Admin)
+   * With safe dependency policy requiring force=true if subordinate resources exist
    */
-  static async deleteTenant(tenantId, userId) {
+  static async deleteTenant(tenantId, userId, { force = false } = {}) {
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
       throw new NotFoundError('Tenant workspace not found');
@@ -203,6 +204,18 @@ export class TenantService {
 
     if (!orgAdminMem) {
       throw new ForbiddenError('Access forbidden: Only Organization Administrators can delete tenant workspaces');
+    }
+
+    if (!force) {
+      const boardCount = await prisma.board.count({ where: { tenantId } });
+      const taskCount = await prisma.task.count({ where: { column: { board: { tenantId } } } });
+
+      if (boardCount > 0 || taskCount > 0) {
+        throw new BadRequestError(
+          `Cannot delete tenant workspace containing active resources (${boardCount} boards, ${taskCount} tasks). Pass force=true query parameter to confirm permanent deletion.`,
+          { boardCount, taskCount }
+        );
+      }
     }
 
     await prisma.tenant.delete({

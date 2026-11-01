@@ -24,7 +24,7 @@ export function createApp(options = {}) {
   // Routes
   app.use('/api', healthRoutes);
   app.use('/api/v1/auth', authRoutes);
-  app.use('/api/v1/organizations', orgRoutes);
+  app.use(['/api/v1/organizations', '/api/v1/orgs'], orgRoutes);
   app.use('/api/v1/tenants', tenantRoutes);
   app.use('/api/v1/boards', boardRoutes);
   app.use('/api/v1/columns', columnRoutes);

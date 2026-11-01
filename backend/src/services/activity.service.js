@@ -41,4 +41,29 @@ export class ActivityService {
       take: Math.min(limit, 100),
     });
   }
+
+  /**
+   * Fetch recent activity logs across an entire tenant workspace, with optional board filtering
+   */
+  static async getTenantActivities(tenantId, { boardId, limit = 50 } = {}) {
+    const where = { tenantId };
+    if (boardId) {
+      where.boardId = boardId;
+    }
+    return prisma.activityLog.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Number(limit) || 50, 100),
+    });
+  }
 }

@@ -1,8 +1,72 @@
 import { prisma } from '../config/prisma.js';
-import { ConflictError, NotFoundError, ForbiddenError } from '../errors/AppError.js';
+import { ConflictError, NotFoundError, ForbiddenError, BadRequestError } from '../errors/AppError.js';
 import { Role } from '@prisma/client';
 
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 export class OrgService {
+  /**
+   * Create a new organization for an authenticated user
+   */
+  static async createOrganization(userId, { name, slug }) {
+    const orgSlug = slug || slugify(name);
+
+    const existingOrg = await prisma.organization.findUnique({
+      where: { slug: orgSlug },
+    });
+    if (existingOrg) {
+      throw new ConflictError(`An organization with slug "${orgSlug}" already exists`);
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const org = await tx.organization.create({
+        data: {
+          name,
+          slug: orgSlug,
+        },
+      });
+
+      const defaultTenant = await tx.tenant.create({
+        data: {
+          orgId: org.id,
+          name: 'Default Workspace',
+          slug: 'default',
+        },
+      });
+
+      // User becomes Org Admin
+      await tx.membership.create({
+        data: {
+          userId,
+          orgId: org.id,
+          tenantId: null,
+          role: Role.ORG_ADMIN,
+        },
+      });
+
+      // User becomes Tenant Admin of default workspace
+      await tx.membership.create({
+        data: {
+          userId,
+          orgId: org.id,
+          tenantId: defaultTenant.id,
+          role: Role.TENANT_ADMIN,
+        },
+      });
+
+      return {
+        ...org,
+        tenants: [defaultTenant],
+      };
+    });
+  }
   /**
    * List all organizations accessible by the user,
    * with tenants scoped strictly to what the user is authorized to view.
@@ -171,8 +235,14 @@ export class OrgService {
 
   /**
    * Delete organization and all subordinate entities (strictly Org Admin)
+   * With safe dependency policy requiring force=true if subordinate resources exist
    */
-  static async deleteOrganization(orgId, userId) {
+  static async deleteOrganization(orgId, userId, { force = false } = {}) {
+    const org = await prisma.organization.findUnique({ where: { id: orgId } });
+    if (!org) {
+      throw new NotFoundError('Organization not found');
+    }
+
     const orgAdminMem = await prisma.membership.findFirst({
       where: {
         userId,
@@ -184,6 +254,19 @@ export class OrgService {
 
     if (!orgAdminMem) {
       throw new ForbiddenError('Access forbidden: Operation requires Organization Administrator privileges');
+    }
+
+    if (!force) {
+      const tenantCount = await prisma.tenant.count({ where: { orgId } });
+      const boardCount = await prisma.board.count({ where: { tenant: { orgId } } });
+      const taskCount = await prisma.task.count({ where: { column: { board: { tenant: { orgId } } } } });
+
+      if (tenantCount > 0 || boardCount > 0 || taskCount > 0) {
+        throw new BadRequestError(
+          `Cannot delete organization containing active resources (${tenantCount} workspaces, ${boardCount} boards, ${taskCount} tasks). Pass force=true query parameter to confirm permanent deletion.`,
+          { tenantCount, boardCount, taskCount }
+        );
+      }
     }
 
     await prisma.organization.delete({

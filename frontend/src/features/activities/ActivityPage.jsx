@@ -6,22 +6,36 @@ import { api } from '../../lib/api/client';
 export function ActivityPage() {
   const { activeTenant } = useAuth();
   const [activities, setActivities] = useState([]);
+  const [boards, setBoards] = useState([]);
+  const [selectedBoardId, setSelectedBoardId] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // Load available boards for filtering
+  useEffect(() => {
+    async function loadBoards() {
+      if (!activeTenant?.id) return;
+      try {
+        const res = await api.get('/boards');
+        if (res?.data) {
+          setBoards(res.data);
+        }
+      } catch (err) {
+        console.error('Failed to load boards for filter:', err);
+      }
+    }
+    loadBoards();
+  }, [activeTenant]);
+
+  // Load activities for the tenant (with optional board filter)
   useEffect(() => {
     async function loadActivities() {
       if (!activeTenant?.id) return;
       try {
         setLoading(true);
-        // Fetch boards for tenant first
-        const boardsRes = await api.get('/boards');
-        if (boardsRes?.data && boardsRes.data.length > 0) {
-          // Fetch activities for first board or aggregate
-          const firstBoard = boardsRes.data[0];
-          const actRes = await api.get(`/boards/${firstBoard.id}/activities?limit=50`);
-          if (actRes?.data) {
-            setActivities(actRes.data);
-          }
+        const query = selectedBoardId ? `?boardId=${selectedBoardId}&limit=50` : '?limit=50';
+        const res = await api.get(`/tenants/${activeTenant.id}/activities${query}`);
+        if (res?.data) {
+          setActivities(res.data);
         } else {
           setActivities([]);
         }
@@ -32,7 +46,7 @@ export function ActivityPage() {
       }
     }
     loadActivities();
-  }, [activeTenant]);
+  }, [activeTenant, selectedBoardId]);
 
   const getActionIcon = (action) => {
     switch (action) {
@@ -69,10 +83,20 @@ export function ActivityPage() {
           </p>
         </div>
 
-        <button className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 shadow-xs">
-          <span>All Activities</span>
-          <ChevronDown className="w-3 h-3 text-slate-400" />
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedBoardId}
+            onChange={(e) => setSelectedBoardId(e.target.value)}
+            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 shadow-xs outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
+          >
+            <option value="">All Activities (Workspace-wide)</option>
+            {boards.map((b) => (
+              <option key={b.id} value={b.id}>
+                Board: {b.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Activity Timeline matching approved reference */}
