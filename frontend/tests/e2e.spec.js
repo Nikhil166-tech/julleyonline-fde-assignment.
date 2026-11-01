@@ -166,7 +166,7 @@ test.describe('JulleyOnline End-to-End Real Persistence & RBAC Test Suite', () =
     await page.fill('input[type="email"]', 'alice@acme.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
-    await expect(page).toHaveURL(/\\/(\\?boardId=.*)?$/);
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
 
     await page.goto('/settings');
     await expect(page.getByRole('button', { name: 'Delete Organization' })).toBeVisible();
@@ -177,7 +177,7 @@ test.describe('JulleyOnline End-to-End Real Persistence & RBAC Test Suite', () =
     await page.fill('input[type="email"]', 'charlie@acme.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
-    await expect(page).toHaveURL(/\\/(\\?boardId=.*)?$/);
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
 
     await page.goto('/settings');
     await expect(page.getByRole('button', { name: 'Delete Organization' })).toHaveCount(0);
