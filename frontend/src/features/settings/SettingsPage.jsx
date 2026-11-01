@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Layers, Settings as SettingsIcon, Save, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Building2, Layers, Settings as SettingsIcon, Save, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api/client';
@@ -65,7 +65,29 @@ export function SettingsPage() {
     }
   };
 
-  const isOrgAdmin = effectiveRole === 'ORG_ADMIN';
+  const isOrgAdmin = Boolean(activeOrg?.isOrgAdmin) || effectiveRole === 'ORG_ADMIN';
+
+  const handleDeleteResource = async (kind) => {
+    const item = kind === 'organization' ? activeOrg : activeTenant;
+    if (!item || !isOrgAdmin) return;
+    const scope = kind === 'organization' ? 'organization and ALL its workspaces, boards and tasks' : 'workspace and ALL its boards and tasks';
+    if (!window.confirm(`Permanently delete ${scope}? This cannot be undone.`)) return;
+    if (window.prompt(`Type "${item.name}" to confirm permanent deletion:`) !== item.name) return;
+    try {
+      setSaving(true);
+      setErrorMsg('');
+      setSuccessMsg('');
+      await api.delete(kind === 'organization'
+        ? `/organizations/${item.id}?force=true`
+        : `/tenants/${item.id}?force=true`);
+      await refreshContexts();
+      setSuccessMsg(kind === 'organization' ? 'Organization deleted.' : 'Workspace deleted.');
+    } catch (err) {
+      setErrorMsg(err.message || 'Could not delete resource.');
+    } finally {
+      setSaving(false);
+    }
+  };
   const isTenantAdmin = effectiveRole === 'TENANT_ADMIN' || isOrgAdmin;
 
   return (
@@ -234,6 +256,21 @@ export function SettingsPage() {
                 </p>
               )}
             </form>
+          )}
+          {isOrgAdmin && activeOrg && (
+            <section className="mt-5 border-t border-rose-200 pt-5 space-y-3">
+              <h3 className="text-sm font-bold text-rose-700">Danger Zone</h3>
+              <p className="text-xs text-slate-600">
+                Permanent deletion removes dependent data. Confirmation and the exact resource name are required.
+              </p>
+              {activeTab === 'organization' ? (
+                <Button type="button" variant="danger" icon={Trash2} size="sm" loading={saving}
+                  onClick={() => handleDeleteResource('organization')}>Delete Organization</Button>
+              ) : activeTenant ? (
+                <Button type="button" variant="danger" icon={Trash2} size="sm" loading={saving}
+                  onClick={() => handleDeleteResource('tenant')}>Delete Workspace</Button>
+              ) : null}
+            </section>
           )}
         </div>
       </div>
