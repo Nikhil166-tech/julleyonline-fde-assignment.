@@ -1,5 +1,6 @@
 import { AppError } from '../errors/AppError.js';
 import { ZodError } from 'zod';
+import { logger } from './logger.middleware.js';
 
 export function errorHandler(err, req, res, next) {
   // If headers have already been sent, delegate to default Express handler
@@ -59,7 +60,7 @@ export function errorHandler(err, req, res, next) {
   }
 
   // Uncaught / Internal Server Error
-  console.error('[Unhandled Error]', err);
+  logger.error(`[Unhandled Error] ${req.method} ${req.originalUrl || req.url}`, err);
 
   const statusCode = err.statusCode || 500;
   const message = process.env.NODE_ENV === 'production'

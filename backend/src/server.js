@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { config } from './config/env.js';
 import { prisma, checkDatabaseHealth } from './config/prisma.js';
 import { initSocketIO } from './socket/index.js';
+import { logger } from './middlewares/logger.middleware.js';
 
 async function bootstrap() {
   const app = createApp();
@@ -14,23 +15,25 @@ async function bootstrap() {
   // Verify database connection at startup
   try {
     const dbStatus = await checkDatabaseHealth();
-    console.log(`[Database] PostgreSQL connection established (${dbStatus.responseTimeMs}ms)`);
+    logger.info(`PostgreSQL connection established (${dbStatus.responseTimeMs}ms) [DB: healthy]`);
   } catch (error) {
-    console.error('[Database] Failed to connect to PostgreSQL:', error.message);
+    logger.error('Failed to connect to PostgreSQL:', error);
     process.exit(1);
   }
 
   server.listen(config.port, () => {
-    console.log(`[Server] JulleyOnline API server running on port ${config.port} in ${config.nodeEnv} mode`);
-    console.log(`[Health] Health endpoint available at http://localhost:${config.port}/api/health`);
+    logger.info(`JulleyOnline API server running on port ${config.port} [Mode: ${config.nodeEnv}]`);
+    logger.info(`Health check endpoint: http://localhost:${config.port}/api/health`);
+    logger.info(`REST API routes: http://localhost:${config.port}/api/v1/*`);
+    logger.info(`Socket.IO server: ws://localhost:${config.port}/socket.io/`);
   });
 
   // Graceful shutdown
   const gracefulShutdown = async (signal) => {
-    console.log(`\n[Server] Received ${signal}. Closing HTTP server and database pool...`);
+    logger.info(`Received ${signal}. Closing HTTP server and database connection pool...`);
     server.close(async () => {
       await prisma.$disconnect();
-      console.log('[Server] Database pool closed. Server terminated cleanly.');
+      logger.info('Database pool closed. Server terminated cleanly.');
       process.exit(0);
     });
   };
@@ -40,6 +43,6 @@ async function bootstrap() {
 }
 
 bootstrap().catch((err) => {
-  console.error('[Bootstrap] Fatal startup error:', err);
+  logger.error('Fatal startup error during bootstrap:', err);
   process.exit(1);
 });

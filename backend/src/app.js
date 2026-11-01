@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { config } from './config/env.js';
+import { requestLogger } from './middlewares/logger.middleware.js';
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import orgRoutes from './routes/org.routes.js';
@@ -20,6 +21,7 @@ export function createApp(options = {}) {
   }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+  app.use(requestLogger);
 
   // Routes
   app.use('/api', healthRoutes);

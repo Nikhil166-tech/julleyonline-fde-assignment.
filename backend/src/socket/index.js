@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { config } from '../config/env.js';
 import { prisma } from '../config/prisma.js';
+import { logger } from '../middlewares/logger.middleware.js';
 
 let ioInstance = null;
 
@@ -85,6 +86,7 @@ export function initSocketIO(httpServer) {
   io.on('connection', (socket) => {
     const userId = socket.user.id;
     socketRoomsMap.set(socket.id, new Set());
+    logger.info(`Socket.IO client connected [ID: ${socket.id}, User: ${socket.user.email}]`);
 
     // Join Board Room with Database Authorization
     socket.on('join:board', async (payload, callback) => {
@@ -173,6 +175,7 @@ export function initSocketIO(httpServer) {
           activeUsers,
           timestamp: new Date().toISOString(),
         });
+        logger.info(`Socket.IO user ${socket.user.email} joined board room [${roomKey}]`);
       } catch (err) {
         console.error('[Socket] Error in join:board:', err);
         socket.emit('room:error', { error: err.message });
@@ -266,6 +269,7 @@ export function initSocketIO(httpServer) {
           activeUsers,
           timestamp: new Date().toISOString(),
         });
+        logger.info(`Socket.IO user ${socket.user.email} joined workspace room [${roomKey}]`);
       } catch (err) {
         console.error('[Socket] Error in join:tenant:', err);
         socket.emit('room:error', { error: err.message });
@@ -284,6 +288,7 @@ export function initSocketIO(httpServer) {
 
     // Disconnect Handler
     socket.on('disconnect', () => {
+      logger.info(`Socket.IO client disconnected [ID: ${socket.id}, User: ${socket.user.email}]`);
       const rooms = socketRoomsMap.get(socket.id) || new Set();
       for (const roomKey of rooms) {
         handleLeavePresence(roomKey, userId, socket.id, io);
@@ -353,6 +358,7 @@ export function broadcastToBoard(tenantId, boardId, event, data) {
     timestamp: new Date().toISOString(),
     ...data,
   };
+  logger.info(`Broadcast [${event}] -> room [${roomKey}]`);
   ioInstance.to(roomKey).emit(event, payload);
 }
 
@@ -369,6 +375,7 @@ export function broadcastToTenant(tenantId, event, data) {
     timestamp: new Date().toISOString(),
     ...data,
   };
+  logger.info(`Broadcast [${event}] -> tenant [${roomKey}]`);
   ioInstance.to(roomKey).emit(event, payload);
 }
 
