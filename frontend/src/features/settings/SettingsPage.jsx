@@ -12,6 +12,8 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (activeOrg) {
@@ -62,6 +64,25 @@ export function SettingsPage() {
       setErrorMsg(err.message || 'Failed to update tenant workspace');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCreateContext = async (event, kind) => {
+    event.preventDefault();
+    if (newName.trim().length < 2) return;
+    setCreating(true);
+    setErrorMsg('');
+    try {
+      await api.post(kind === 'organization'
+        ? '/organizations'
+        : `/organizations/${activeOrg.id}/tenants`, { name: newName.trim() });
+      await refreshContexts();
+      setNewName('');
+      setSuccessMsg(kind === 'organization' ? 'Organization created.' : 'Workspace created.');
+    } catch (err) {
+      setErrorMsg(err.message || 'Could not create the resource.');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -159,7 +180,17 @@ export function SettingsPage() {
 
         {/* Right Settings Form */}
         <div className="md:col-span-3 bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
-          {activeTab === 'organization' ? (
+          {!activeOrg ? (
+            <form onSubmit={(e) => handleCreateContext(e, 'organization')} className="space-y-3 text-xs">
+              <h3 className="text-sm font-bold">No organization selected</h3>
+              <p className="text-slate-600">You can create a new organization and default workspace.</p>
+              <label className="block font-semibold" htmlFor="new-context-name">Organization Name</label>
+              <input id="new-context-name" type="text" required minLength={2} maxLength={100}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200"
+                value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <Button type="submit" loading={creating}>Create Organization</Button>
+            </form>
+          ) : activeTab === 'organization' ? (
             <form onSubmit={handleSaveOrg} className="space-y-4 text-xs">
               <div className="border-b border-slate-100 pb-3">
                 <h3 className="text-sm font-bold text-slate-900">Organization Settings</h3>
@@ -208,6 +239,16 @@ export function SettingsPage() {
                   Only Organization Administrators can update organization settings.
                 </p>
               )}
+            </form>
+          ) : !activeTenant ? (
+            <form onSubmit={(e) => handleCreateContext(e, 'tenant')} className="space-y-3 text-xs">
+              <h3 className="text-sm font-bold">No workspace selected</h3>
+              <p className="text-slate-600">Organization Admins can create a new workspace.</p>
+              <label className="block font-semibold" htmlFor="new-workspace-name">Workspace Name</label>
+              <input id="new-workspace-name" type="text" required minLength={2} maxLength={100}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200"
+                value={newName} onChange={(e) => setNewName(e.target.value)} disabled={!isOrgAdmin} />
+              {isOrgAdmin && <Button type="submit" loading={creating}>Create Workspace</Button>}
             </form>
           ) : (
             <form onSubmit={handleSaveTenant} className="space-y-4 text-xs">
