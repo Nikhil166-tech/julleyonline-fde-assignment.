@@ -55,4 +55,23 @@ test.describe('JulleyOnline Phase 4 Screenshots Capture', () => {
       await contextCharlie.close();
     }
   });
+
+  test('Capture screenshots of Settings Danger Zone for Org Admin (Alice)', async ({ page }) => {
+    // 1. Log in as Alice (Org Admin)
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'alice@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
+
+    // 2. Settings: Organization tab
+    await page.goto('/settings');
+    await expect(page.getByRole('button', { name: 'Delete Organization' })).toBeVisible();
+    await page.screenshot({ path: path.join(docsDir, 'settings_org_admin_delete_org.png') });
+
+    // 3. Settings: Workspace tab
+    await page.getByRole('button', { name: 'Workspace (Tenant)' }).click();
+    await expect(page.getByRole('button', { name: 'Delete Workspace' })).toBeVisible();
+    await page.screenshot({ path: path.join(docsDir, 'settings_org_admin_delete_workspace.png') });
+  });
 });
