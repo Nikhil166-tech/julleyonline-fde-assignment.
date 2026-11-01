@@ -6,13 +6,13 @@ import { useAuth } from '../../context/AuthContext';
 
 export function RegisterPage() {
   const [formData, setFormData] = useState({
-    name: 'Sarah Connor',
-    email: 'sarah@skynet.com',
-    password: 'password123',
-    orgName: 'Cyberdyne Systems',
-    orgSlug: 'cyberdyne',
-    tenantName: 'Core Robotics',
-    tenantSlug: 'robotics',
+    name: '',
+    email: '',
+    password: '',
+    orgName: '',
+    orgSlug: '',
+    tenantName: '',
+    tenantSlug: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -81,7 +81,7 @@ export function RegisterPage() {
                   value={formData.name}
                   onChange={handleChange}
                   required
-                  placeholder="Sarah Connor"
+                  placeholder="e.g. Sarah Connor"
                   className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                 />
               </div>
@@ -128,7 +128,8 @@ export function RegisterPage() {
                   value={formData.orgName}
                   onChange={handleChange}
                   required
-                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-slate-800"
+                  placeholder="e.g. Acme Corp"
+                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                 />
               </div>
               <div>
@@ -139,7 +140,8 @@ export function RegisterPage() {
                   value={formData.tenantName}
                   onChange={handleChange}
                   required
-                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-slate-800"
+                  placeholder="e.g. Engineering"
+                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                 />
               </div>
             </div>
