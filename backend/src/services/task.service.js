@@ -38,7 +38,8 @@ export class TaskService {
 
     // 3. Atomically determine contiguous position and insert task
     return prisma.$transaction(async (tx) => {
-      // Lock target column to serialize concurrent creations and prevent position collisions
+      // Establish hierarchical lock order: parent board first, target column second (prevents deadlocks with column operations)
+      await tx.$executeRaw`SELECT 1 FROM boards WHERE id = ${boardId}::uuid FOR SHARE`;
       await tx.$executeRaw`SELECT 1 FROM columns WHERE id = ${columnId}::uuid FOR UPDATE`;
 
       // Re-verify target column exists under lock

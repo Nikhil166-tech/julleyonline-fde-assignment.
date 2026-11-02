@@ -68,23 +68,52 @@ describe('Phase 1A: Backend Foundation Test Suite', () => {
       );
     });
 
-    it('TC-SAF-01: validateTestDatabaseUrl allows julleyonline_kanban_test and rejects dev or prod databases', async () => {
-      const { validateTestDatabaseUrl } = await import('../scripts/reset-test-db.js');
+    it('TC-SAF-01: validateTestDatabaseUrl allows julleyonline_kanban_test and safely rejects dev, prod, or spoofed URLs without side effects', async () => {
+      const { validateTestDatabaseUrl } = await import('../scripts/test-db-guard.js');
+
+      // 1. Valid test DB URL is accepted
       assert.equal(
         validateTestDatabaseUrl('postgresql://postgres:postgres@localhost:5433/julleyonline_kanban_test?schema=public'),
         'julleyonline_kanban_test'
       );
+
+      // 2. Development DB URL is rejected
       assert.throws(
         () => validateTestDatabaseUrl('postgresql://postgres:postgres@localhost:5433/julleyonline_kanban?schema=public'),
-        /CRITICAL SAFETY ABORT/
+        /CRITICAL SAFETY ABORT: Refused execution against database "julleyonline_kanban"/
       );
+
+      // 3. PostgreSQL system database is rejected
       assert.throws(
         () => validateTestDatabaseUrl('postgresql://postgres:postgres@localhost:5433/postgres'),
         /CRITICAL SAFETY ABORT/
       );
+
+      // 4. Production URL with query param ?test=true is rejected
       assert.throws(
-        () => validateTestDatabaseUrl('postgresql://prod-db:5432/julleyonline_kanban?test=true'),
-        /CRITICAL SAFETY ABORT/
+        () => validateTestDatabaseUrl('postgresql://secretUser:secretPass@prod-cluster.cloud:5432/julleyonline_kanban?test=true'),
+        (err) => {
+          assert.match(err.message, /CRITICAL SAFETY ABORT/);
+          // 8. Avoid printing database credentials in error messages
+          assert.ok(!err.message.includes('secretUser') && !err.message.includes('secretPass'), 'Credentials must not leak');
+          return true;
+        }
+      );
+
+      // 5. Hostname containing "test" with non-test database is rejected
+      assert.throws(
+        () => validateTestDatabaseUrl('postgresql://user:pass@test-server.infra.net:5432/production'),
+        /CRITICAL SAFETY ABORT: Refused execution against database "production"/
+      );
+
+      // 6. Missing, empty, or non-string URLs are rejected
+      assert.throws(() => validateTestDatabaseUrl(''), /DATABASE_URL is missing or invalid/);
+      assert.throws(() => validateTestDatabaseUrl(null), /DATABASE_URL is missing or invalid/);
+
+      // 7. Malformed URLs are rejected without credentials leak
+      assert.throws(
+        () => validateTestDatabaseUrl('not a valid url at all'),
+        /Malformed DATABASE_URL: Invalid URL format/
       );
     });
   });

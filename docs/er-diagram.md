@@ -30,7 +30,7 @@ erDiagram
     USER ||--o{ MEMBERSHIP : "participates (1:N)"
     USER ||--o{ BOARD : "creates (1:N)"
     USER ||--o{ TASK : "creates (1:N)"
-    USER ||--o{ TASK : "assigned_to (0:N)"
+    USER o|--o{ TASK : "assigned_to (0:N)"
     USER ||--o{ ACTIVITY_LOG : "performs (1:N)"
 
     BOARD ||--o{ COLUMN : "contains (1:N)"

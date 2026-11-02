@@ -1316,5 +1316,146 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
         }
       );
     });
+
+    it('TC-MOV-CONC-05: Concurrency Scenario A - Task creation holds column lock, blocking column deletion; commit causes delete to reject without task loss', async () => {
+      const { ColumnService } = await import('../src/services/column.service.js');
+
+      // 1. Create an isolated empty column
+      const colA = await prisma.column.create({
+        data: {
+          tenantId: acmeEngTenant.id,
+          boardId: testBoardId,
+          name: `Scenario A Col ${Date.now()}`,
+          position: 150,
+        },
+      });
+
+      let lockAcquiredResolve;
+      const lockAcquiredPromise = new Promise((resolve) => { lockAcquiredResolve = resolve; });
+      let allowCommitResolve;
+      const allowCommitPromise = new Promise((resolve) => { allowCommitResolve = resolve; });
+
+      // 2. Start a transaction that locks board & column first and creates a task
+      const taskCreationTx = prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT 1 FROM boards WHERE id = ${testBoardId}::uuid FOR SHARE`;
+        await tx.$executeRaw`SELECT 1 FROM columns WHERE id = ${colA.id}::uuid FOR UPDATE`;
+        lockAcquiredResolve(); // Signal that locks are held
+        await allowCommitPromise; // Hold the lock until deleteColumn is actively waiting
+
+        return tx.task.create({
+          data: {
+            tenantId: acmeEngTenant.id,
+            boardId: testBoardId,
+            columnId: colA.id,
+            createdByUserId: bobUser.id,
+            title: 'Concurrent Task in Col A',
+            position: 0,
+            version: 1,
+          },
+        });
+      });
+
+      // Wait until task transaction holds the lock
+      await lockAcquiredPromise;
+
+      // 3. Launch ColumnService.deleteColumn; it will block on SELECT 1 FROM columns ... FOR UPDATE
+      const deletePromise = ColumnService.deleteColumn(acmeEngTenant.id, colA.id, bobUser.id);
+
+      // Brief pause to ensure deleteColumn is blocked in PostgreSQL
+      await new Promise((r) => setTimeout(r, 60));
+
+      // 4. Release task transaction so it commits
+      allowCommitResolve();
+      const createdTask = await taskCreationTx;
+      assert.ok(createdTask);
+
+      // 5. deleteColumn unblocks, checks task count (now 1), and must reject
+      await assert.rejects(
+        deletePromise,
+        (err) => {
+          assert.equal(err.name, 'ValidationError');
+          assert.match(err.message, /Cannot delete column containing 1 task\(s\)/);
+          return true;
+        }
+      );
+
+      // 6. Assertions: column still exists and task is not deleted or orphaned
+      const colCheck = await prisma.column.findUnique({ where: { id: colA.id } });
+      assert.ok(colCheck, 'Column must remain intact');
+
+      const taskCheck = await prisma.task.findUnique({ where: { id: createdTask.id } });
+      assert.ok(taskCheck, 'Created task must not be silently deleted or lost');
+      assert.equal(taskCheck.columnId, colA.id);
+
+      // Cleanup
+      await prisma.task.delete({ where: { id: createdTask.id } });
+      await prisma.column.delete({ where: { id: colA.id } });
+    });
+
+    it('TC-MOV-CONC-06: Concurrency Scenario B - Column deletion holds lock; concurrent task creation waits and safely fails without orphan creation', async () => {
+      const { TaskService } = await import('../src/services/task.service.js');
+
+      // 1. Create an isolated empty column
+      const colB = await prisma.column.create({
+        data: {
+          tenantId: acmeEngTenant.id,
+          boardId: testBoardId,
+          name: `Scenario B Col ${Date.now()}`,
+          position: 151,
+        },
+      });
+
+      let deleteLockResolve;
+      const deleteLockPromise = new Promise((resolve) => { deleteLockResolve = resolve; });
+      let allowDeleteCommitResolve;
+      const allowDeleteCommitPromise = new Promise((resolve) => { allowDeleteCommitResolve = resolve; });
+
+      // 2. Start a transaction that locks board & column, deletes column, and commits
+      const deleteTx = prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT 1 FROM boards WHERE id = ${testBoardId}::uuid FOR UPDATE`;
+        await tx.$executeRaw`SELECT 1 FROM columns WHERE id = ${colB.id}::uuid FOR UPDATE`;
+        deleteLockResolve(); // Signal that deletion lock is held
+        await allowDeleteCommitPromise;
+
+        await tx.column.delete({ where: { id: colB.id } });
+        return { deleted: true };
+      });
+
+      // Wait until deletion holds lock
+      await deleteLockPromise;
+
+      // 3. Launch TaskService.createTask; it will block on SELECT 1 FROM columns ... FOR UPDATE
+      const createTaskPromise = TaskService.createTask(acmeEngTenant.id, testBoardId, bobUser.id, {
+        columnId: colB.id,
+        title: 'Orphan Candidate Task',
+        priority: 'HIGH',
+      });
+
+      // Brief pause to ensure createTask is blocked in PostgreSQL
+      await new Promise((r) => setTimeout(r, 60));
+
+      // 4. Allow column deletion to commit
+      allowDeleteCommitResolve();
+      await deleteTx;
+
+      // 5. createTask unblocks, re-checks lockedCol, sees column is deleted, and must reject safely
+      await assert.rejects(
+        createTaskPromise,
+        (err) => {
+          assert.equal(err.name, 'ValidationError');
+          assert.match(err.message, /Target column not found/);
+          return true;
+        }
+      );
+
+      // 6. Assertions: Column is deleted and zero orphaned tasks exist
+      const colCheck = await prisma.column.findUnique({ where: { id: colB.id } });
+      assert.equal(colCheck, null, 'Column must be deleted');
+
+      const orphanCheck = await prisma.task.findMany({
+        where: { title: 'Orphan Candidate Task', boardId: testBoardId },
+      });
+      assert.equal(orphanCheck.length, 0, 'No orphaned tasks created in database');
+    });
   });
 });

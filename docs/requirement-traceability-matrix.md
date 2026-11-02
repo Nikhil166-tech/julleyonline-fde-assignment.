@@ -1,8 +1,8 @@
 # JulleyOnline Requirement Traceability Matrix (RTM)
 
-**Generated:** November 1, 2026  
+**Generated:** November 2, 2026  
 **Evaluation Scope:** Complete JulleyOnline Multi-Tenant SaaS Kanban Application (Phases 1A through Phase 5 + Compliance Hardening & Pre-Submission Verifications)  
-**Overall Verdict:** **100% VERIFIED** (128 of 128 Automated Tests Passing with Execution Evidence)
+**Overall Verdict:** **100% VERIFIED** (138 of 138 Automated Tests Passing with Execution Evidence)
 
 ---
 
@@ -20,12 +20,12 @@
 | **REQ-ORG-02** | Dynamic Organization creation for authenticated users | `backend/src/routes/org.routes.js`, `backend/src/services/org.service.js` | `POST /api/v1/organizations` | `backend/tests/phase2a.test.js`: `TC-CRUD-01` | Creates org, default workspace, and Org Admin membership | **VERIFIED** |
 | **REQ-TNT-01** | Tenant workspace CRUD and tenant isolation | `backend/src/routes/tenant.routes.js`, `backend/src/services/tenant.service.js` | `POST /api/v1/organizations/:id/tenants`, `GET /api/v1/tenants/:id` | `backend/tests/phase2a.test.js`: `TC-TNT-01` to `TC-TNT-05` | Unique slug validation, foreign key constraints enforced | **VERIFIED** |
 | **REQ-DEL-01** | Safe Deletion Policy with dependency checks & explicit force confirmation | `backend/src/services/org.service.js`, `backend/src/services/tenant.service.js` | `DELETE /organizations/:id`, `DELETE /tenants/:id` | `backend/tests/phase2a.test.js`: `TC-CRUD-02`, `TC-CRUD-03`, `TC-CRUD-04`, `TC-CRUD-06` | Rejects with 400 Bad Request if boards/tasks exist unless `?force=true` | **VERIFIED** |
-| **REQ-MEM-01** | Tenant membership management: list, add, update role, remove | `backend/src/routes/tenant.routes.js`, `backend/src/services/membership.service.js` | `GET/POST/PATCH/DELETE /api/v1/tenants/:id/members` | `backend/tests/phase2a.test.js`: `TC-MEM-01` to `TC-MEM-08`, `MembersPage.jsx` | Cannot remove last Org Admin; dynamic role update immediate | **VERIFIED** |
+| **REQ-MEM-01** | Tenant membership management: list, add, update role, remove | `backend/src/routes/tenant.routes.js`, `backend/src/services/membership.service.js` | `GET/POST/PATCH/DELETE /api/v1/tenants/:id/members` | `backend/tests/phase2a.test.js`: `TC-MEM-01` to `TC-MEM-09`, `MembersPage.jsx` | Cannot remove last Org Admin; dynamic role update immediate | **VERIFIED** |
 | **REQ-BRD-01** | Board CRUD scoped to active authorized tenant | `backend/src/routes/board.routes.js`, `backend/src/services/board.service.js` | `POST /api/v1/boards`, `GET /api/v1/boards`, `BoardsPage.jsx` | `backend/tests/phase2b.test.js`: `TC-BRD-01` to `TC-BRD-05`, `e2e.spec.js`: `E2E-02` | Creates default Backlog, In Progress, Done columns on create | **VERIFIED** |
 | **REQ-BRD-02** | Modern searchable board selector with short ID & identical name support | `frontend/src/components/layout/BoardSelector.jsx`, `DashboardPage.jsx` | `[data-testid="board-selector-trigger"]`, dropdown | `frontend/tests/board-selector.spec.js`: `SEL-01` to `SEL-06` | Live filtering by name/ID, distinct `#<id8>` badges, RBAC | **VERIFIED** |
-| **REQ-COL-01** | Column creation, renaming, reordering, and non-empty deletion safety | `backend/src/routes/column.routes.js`, `backend/src/services/column.service.js` | `POST/PATCH/DELETE /api/v1/columns/:id`, `KanbanColumn.jsx` | `backend/tests/phase2b.test.js`: `TC-COL-01` to `TC-COL-05`, `TC-MOV-CONC-03`, `TC-MOV-CONC-04`, `e2e.spec.js`: `E2E-03` | Non-empty column deletion rejected with 400 Bad Request | **VERIFIED** |
+| **REQ-COL-01** | Column creation, renaming, reordering, and non-empty deletion safety | `backend/src/routes/column.routes.js`, `backend/src/services/column.service.js` | `POST/PATCH/DELETE /api/v1/columns/:id`, `KanbanColumn.jsx` | `backend/tests/phase2b.test.js`: `TC-COL-01` to `TC-COL-05`, `TC-MOV-CONC-03` to `TC-MOV-CONC-06`, `e2e.spec.js`: `E2E-03` | Non-empty column deletion rejected with 400 Bad Request | **VERIFIED** |
 | **REQ-TSK-01** | Task CRUD, assignment, priority, and rich specifications | `backend/src/routes/task.routes.js`, `backend/src/services/task.service.js` | `POST/GET/PATCH/DELETE /api/v1/tasks/:id`, `TaskDetailsDrawer.jsx` | `backend/tests/phase2b.test.js`: `TC-TSK-01` to `TC-TSK-06`, `e2e.spec.js`: `E2E-02` | Zod validated; assignees restricted to active tenant members | **VERIFIED** |
-| **REQ-TSK-02** | Contiguous integer task reordering & cross-column moves in DB transactions | `backend/src/services/task.service.js` (`moveTask`) | `POST /api/v1/tasks/:id/move`, `dnd-kit` Board | `backend/tests/phase2b.test.js`: `TC-MOV-01` to `TC-MOV-05`, `TC-MOV-CONC-01` to `TC-MOV-CONC-04`, `phase4-collab.spec.js`: `COL-03` | Zero position gaps, zero decimal drift, column-lock serialized | **VERIFIED** |
+| **REQ-TSK-02** | Contiguous integer task reordering & cross-column moves in DB transactions | `backend/src/services/task.service.js` (`moveTask`) | `POST /api/v1/tasks/:id/move`, `dnd-kit` Board | `backend/tests/phase2b.test.js`: `TC-MOV-01` to `TC-MOV-05`, `TC-MOV-CONC-01` to `TC-MOV-CONC-06`, `phase4-collab.spec.js`: `COL-03` | Zero position gaps, zero decimal drift, column-lock serialized | **VERIFIED** |
 | **REQ-OCC-01** | Version-based Optimistic Concurrency Control (OCC) and HTTP 409 Conflict protocol | `backend/src/services/task.service.js`, `frontend/src/components/modals/ConflictModal.jsx` | `version` field increment, `409 Conflict` payload | `backend/tests/phase2b.test.js`: `TC-OCC-01` to `TC-OCC-11`, `e2e.spec.js`: `E2E-07`, `phase4-collab.spec.js`: `COL-04` | Atomic version check; returns latest authoritative server state | **VERIFIED** |
 | **REQ-ACT-01** | Board-level audit activity history logging | `backend/src/services/activity.service.js`, `frontend/src/features/activities/ActivityPage.jsx` | `GET /api/v1/boards/:id/activities`, `ActivityPage.jsx` | `backend/tests/phase2b.test.js`: `TC-BRD-05` | Logs creation, edits, moves, assignments with user metadata | **VERIFIED** |
 | **REQ-ACT-02** | Tenant workspace-wide audit activity logging with board filter | `backend/src/routes/tenant.routes.js`, `backend/src/services/activity.service.js` | `GET /api/v1/tenants/:id/activities`, `ActivityPage.jsx` | `backend/tests/phase2a.test.js`: `TC-CRUD-05` | Workspace-level activities with board filtering & cross-tenant denial | **VERIFIED** |
@@ -34,14 +34,14 @@
 | **REQ-REC-01** | Network disconnection resilience, auto-reconnect, and snapshot resync | `frontend/src/context/SocketContext.jsx`, `DashboardPage.jsx` | Reconnection listeners, `GET /api/v1/boards/:id` snapshot | `phase4-collab.spec.js`: `COL-06`, `backend/tests/phase4.test.js`: `TC-SCK-01` | Automatically re-authenticates, rejoins room, refetches state | **VERIFIED** |
 | **REQ-UND-01** | Client-side Undo/Redo history stack with OCC validation safeguards | `frontend/src/context/UndoRedoContext.jsx`, `DashboardPage.jsx` | `Ctrl+Z`, `Ctrl+Y`, Undo/Redo buttons | `phase4-collab.spec.js`: `COL-05`, `COL-07` | Preserves recorded action version; rejects stale undo if collaborator updated task | **VERIFIED** |
 | **REQ-ERD-01** | Database ER Diagram & Architecture Specification | `backend/prisma/schema.prisma`, `docs/er-diagram.md` | Authoritative 8-entity Mermaid ER diagram & spec | Verified in `docs/er-diagram.md` and schema tests | 8 tables, indexes, cascading rules, OCC versioning specified | **VERIFIED** |
-| **REQ-ENV-01** | Strict test database isolation and safe teardown | `backend/.env.test`, `backend/scripts/reset-test-db.js`, `playwright.config.js` | Dedicated port 5001, test DB `julleyonline_kanban_test` | `frontend/tests/board-selector.spec.js`, `inspect-boards.js` | Tests execute strictly against test DB; dev DB protected | **VERIFIED** |
+| **REQ-ENV-01** | Strict test database isolation and safe teardown | `backend/.env.test`, `backend/scripts/test-db-guard.js`, `backend/scripts/reset-test-db.js`, `playwright.config.js` | Dedicated port 5001, test DB `julleyonline_kanban_test` | `frontend/tests/board-selector.spec.js`, `backend/tests/phase1a.test.js: TC-SAF-01` | Tests execute strictly against test DB; dev DB protected | **VERIFIED** |
 
 ---
 
 ## 2. Test Execution Summary
 
-- **Total Backend Automated Tests:** 108 Passed (0 Failed, 0 Skipped)
+- **Total Backend Automated Tests:** 118 Passed (0 Failed, 0 Skipped)
 - **Total Frontend Playwright E2E Tests:** 20 Passed (0 Failed, 0 Skipped)
 - **Total Screenshot Capture Specs:** 2 Passed (9 high-fidelity screenshots in `docs/`)
-- **Combined Test Count:** **128 Automated Tests** Passing with 100% Deterministic Execution Evidence.
-- **Baseline Development Database:** Exactly 2 boards preserved in `julleyonline_kanban`. Zero test pollution.
+- **Combined Test Count:** **138 Automated Tests** Passing with 100% Deterministic Execution Evidence.
+- **Baseline Development Database:** Exactly 4 boards preserved in `julleyonline_kanban`. Zero test pollution.

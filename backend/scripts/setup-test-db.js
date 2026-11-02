@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
+import { validateTestDatabaseUrl } from './test-db-guard.js';
 
 const baseDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/julleyonline_kanban?schema=public';
 const testDbUrl =
@@ -8,11 +9,7 @@ const testDbUrl =
     ? baseDbUrl
     : baseDbUrl.replace(/(\/[^/?]+)(\?.*)?$/, '$1_test$2'));
 
-const parsedTestUrl = new URL(testDbUrl);
-const testDbName = parsedTestUrl.pathname.replace(/^\//, '').split('?')[0];
-if (testDbName !== 'julleyonline_kanban_test') {
-  throw new Error(`CRITICAL SAFETY ABORT: setup-test-db.js resolved invalid test database: ${testDbName}`);
-}
+validateTestDatabaseUrl(testDbUrl);
 
 const devPrisma = new PrismaClient({
   datasources: {

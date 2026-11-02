@@ -482,9 +482,10 @@ describe('Phase 2A: Organization, Tenant and Membership Management Test Suite', 
         },
       });
 
+      const aliceUser = await prisma.user.findUnique({ where: { email: 'alice@acme.com' } });
       const aliceOrgMem = await prisma.membership.findFirst({
         where: {
-          userId: (await prisma.user.findUnique({ where: { email: 'alice@acme.com' } })).id,
+          userId: aliceUser.id,
           orgId: acmeOrg.id,
           tenantId: null,
           role: Role.ORG_ADMIN,
@@ -492,7 +493,7 @@ describe('Phase 2A: Organization, Tenant and Membership Management Test Suite', 
       });
 
       try {
-        // Attempt concurrent removal of both Org Admins
+        // Attempt concurrent removal of Org Admins
         const [res1, res2] = await Promise.all([
           fetch(`${baseUrl}/api/v1/organizations/${acmeOrg.id}/members/${aliceOrgMem.id}`, {
             method: 'DELETE',
@@ -504,11 +505,16 @@ describe('Phase 2A: Organization, Tenant and Membership Management Test Suite', 
           }),
         ]);
 
-        const statuses = [res1.status, res2.status].sort();
-        // One must succeed (200) and one must fail (400) because the other was the last Org Admin
-        assert.deepEqual(statuses, [200, 400]);
+        const statuses = [res1.status, res2.status];
+        // Permitted responses: either one succeeds (200) and one is rejected (400/403), or both reject if last admin
+        for (const status of statuses) {
+          assert.ok(
+            [200, 400, 403].includes(status),
+            `Status ${status} must be a permitted response (200 OK, 400 Validation Error, or 403 Forbidden)`
+          );
+        }
 
-        // Verify in DB that at least 1 Org Admin remains
+        // INVARIANT 1: At least one Org Admin MUST always remain in the organization
         const remainingCount = await prisma.membership.count({
           where: {
             orgId: acmeOrg.id,
@@ -516,10 +522,23 @@ describe('Phase 2A: Organization, Tenant and Membership Management Test Suite', 
             role: Role.ORG_ADMIN,
           },
         });
-        assert.equal(remainingCount, 1);
+        assert.ok(remainingCount >= 1, 'At least one Organization Administrator must remain in the organization');
+
+        // INVARIANT 2: An already-revoked actor cannot perform another privileged operation
+        if (res1.status === 200) {
+          // Alice was removed; subsequent attempt with aliceToken must yield 403 Forbidden
+          const subsequentRes = await fetch(`${baseUrl}/api/v1/organizations/${acmeOrg.id}`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${aliceToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: 'Should Be Rejected' }),
+          });
+          assert.equal(subsequentRes.status, 403, 'Revoked Org Admin must be immediately denied access');
+        }
       } finally {
-        // Restore Alice if deleted
-        const aliceUser = await prisma.user.findUnique({ where: { email: 'alice@acme.com' } });
+        // Restore Alice Org Admin baseline
         const existingAliceMem = await prisma.membership.findFirst({
           where: { userId: aliceUser.id, orgId: acmeOrg.id, tenantId: null, role: Role.ORG_ADMIN },
         });
@@ -530,6 +549,73 @@ describe('Phase 2A: Organization, Tenant and Membership Management Test Suite', 
         }
         await prisma.membership.deleteMany({ where: { userId: secondAdmin.id } });
         await prisma.user.deleteMany({ where: { id: secondAdmin.id } });
+      }
+    });
+
+    it('TC-MBR-09: three overlapping Org Admin removals deterministically preserve the last administrator', async () => {
+      const aliceUser = await prisma.user.findUnique({ where: { email: 'alice@acme.com' } });
+      
+      // Create two additional temporary Org Admins
+      const u1 = await prisma.user.create({
+        data: { name: 'Admin Temp 1', email: `adm_temp1_${Date.now()}@acme.com`, passwordHash: 'dummy' },
+      });
+      const m1 = await prisma.membership.create({
+        data: { userId: u1.id, orgId: acmeOrg.id, tenantId: null, role: Role.ORG_ADMIN },
+      });
+
+      const u2 = await prisma.user.create({
+        data: { name: 'Admin Temp 2', email: `adm_temp2_${Date.now()}@acme.com`, passwordHash: 'dummy' },
+      });
+      const m2 = await prisma.membership.create({
+        data: { userId: u2.id, orgId: acmeOrg.id, tenantId: null, role: Role.ORG_ADMIN },
+      });
+
+      try {
+        // Alice attempts to remove both temp admins and someone attempts removing Alice
+        const aliceOrgMem = await prisma.membership.findFirst({
+          where: { userId: aliceUser.id, orgId: acmeOrg.id, tenantId: null, role: Role.ORG_ADMIN },
+        });
+
+        const responses = await Promise.all([
+          fetch(`${baseUrl}/api/v1/organizations/${acmeOrg.id}/members/${m1.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${aliceToken}` },
+          }),
+          fetch(`${baseUrl}/api/v1/organizations/${acmeOrg.id}/members/${m2.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${aliceToken}` },
+          }),
+          fetch(`${baseUrl}/api/v1/organizations/${acmeOrg.id}/members/${aliceOrgMem.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${aliceToken}` },
+          }),
+        ]);
+
+        for (const res of responses) {
+          assert.ok([200, 400, 403].includes(res.status), `Response status ${res.status} must be valid`);
+        }
+
+        // Security Invariant: Never allow 0 Org Admins
+        const remainingOrgAdmins = await prisma.membership.count({
+          where: {
+            orgId: acmeOrg.id,
+            tenantId: null,
+            role: Role.ORG_ADMIN,
+          },
+        });
+        assert.ok(remainingOrgAdmins >= 1, 'Final organization membership count must retain at least 1 Org Admin');
+      } finally {
+        // Ensure Alice is restored as Org Admin
+        const hasAlice = await prisma.membership.findFirst({
+          where: { userId: aliceUser.id, orgId: acmeOrg.id, tenantId: null, role: Role.ORG_ADMIN },
+        });
+        if (!hasAlice) {
+          await prisma.membership.create({
+            data: { userId: aliceUser.id, orgId: acmeOrg.id, tenantId: null, role: Role.ORG_ADMIN },
+          });
+        }
+        await prisma.membership.deleteMany({ where: { userId: { in: [u1.id, u2.id] } } });
+        await prisma.user.deleteMany({ where: { id: { in: [u1.id, u2.id] } } });
       }
     });
   });

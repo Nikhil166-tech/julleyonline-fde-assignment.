@@ -124,7 +124,7 @@ Represents the top-level business organization (e.g., enterprise client or compa
 - `name` (VARCHAR(255), NOT NULL): Legal or display name of the organization.
 - `slug` (VARCHAR(100), UNIQUE, NOT NULL): URL-safe identifier (e.g. `acme-corp`).
 - `created_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
-- `updated_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
+- `updated_at` (TIMESTAMPTZ, NOT NULL, automatically managed on mutation by Prisma via `@updatedAt`).
 
 ### 3.2 `tenants`
 Independent workspace subdivisions within an organization (e.g., departments, teams, clients).
@@ -133,7 +133,7 @@ Independent workspace subdivisions within an organization (e.g., departments, te
 - `name` (VARCHAR(255), NOT NULL): Tenant workspace name.
 - `slug` (VARCHAR(100), NOT NULL): URL-friendly slug unique within the organization.
 - `created_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
-- `updated_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
+- `updated_at` (TIMESTAMPTZ, NOT NULL, automatically managed on mutation by Prisma via `@updatedAt`).
 - **Constraints**: `UNIQUE (org_id, slug)`.
 
 ### 3.3 `users`
@@ -144,7 +144,7 @@ Global user identity credentials and personal profile.
 - `name` (VARCHAR(255), NOT NULL): Full display name.
 - `avatar_url` (VARCHAR(1024), NULLABLE): Optional profile picture URL.
 - `created_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
-- `updated_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
+- `updated_at` (TIMESTAMPTZ, NOT NULL, automatically managed on mutation by Prisma via `@updatedAt`).
 
 ### 3.4 `memberships`
 Binds a user to an organization and optionally to a specific tenant workspace with a designated role.
@@ -154,7 +154,7 @@ Binds a user to an organization and optionally to a specific tenant workspace wi
 - `tenant_id` (UUID, NULLABLE, FK $\to$ `tenants.id` ON DELETE CASCADE): If NULL and role is `ORG_ADMIN`, user has org-wide administrative authority across all tenants. If populated, scopes permissions to that specific tenant.
 - `role` (ENUM: `ORG_ADMIN`, `TENANT_ADMIN`, `MEMBER`, NOT NULL): Assigned RBAC role.
 - `created_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
-- `updated_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
+- `updated_at` (TIMESTAMPTZ, NOT NULL, automatically managed on mutation by Prisma via `@updatedAt`).
 - **Constraints**:
   - `UNIQUE (user_id, org_id, tenant_id)` and partial unique index `idx_unique_org_admin_membership` on `(user_id, org_id) WHERE tenant_id IS NULL` to enforce single Org Admin membership when `tenant_id` is null.
 
@@ -166,7 +166,7 @@ Kanban boards dedicated to a specific tenant project.
 - `description` (TEXT, NULLABLE): Board summary.
 - `created_by_user_id` (UUID, NOT NULL, FK $\to$ `users.id` ON DELETE RESTRICT).
 - `created_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
-- `updated_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
+- `updated_at` (TIMESTAMPTZ, NOT NULL, automatically managed on mutation by Prisma via `@updatedAt`).
 
 ### 3.6 `columns`
 Workflow stages within a board (e.g., "Backlog", "In Progress", "Code Review", "Done").
@@ -176,7 +176,7 @@ Workflow stages within a board (e.g., "Backlog", "In Progress", "Code Review", "
 - `name` (VARCHAR(100), NOT NULL): Column header.
 - `position` (INTEGER, NOT NULL): 0-indexed integer position for column layout.
 - `created_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
-- `updated_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
+- `updated_at` (TIMESTAMPTZ, NOT NULL, automatically managed on mutation by Prisma via `@updatedAt`).
 
 ### 3.7 `tasks`
 Work items tracked across columns.
@@ -193,7 +193,7 @@ Work items tracked across columns.
 - `due_date` (TIMESTAMPTZ, NULLABLE): Optional deadline.
 - `version` (INTEGER, NOT NULL, DEFAULT: `1`): Monotonically increasing version counter for Optimistic Concurrency Control.
 - `created_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
-- `updated_at` (TIMESTAMPTZ, NOT NULL, DEFAULT: `NOW()`).
+- `updated_at` (TIMESTAMPTZ, NOT NULL, automatically managed on mutation by Prisma via `@updatedAt`).
 
 ### 3.8 `activity_logs`
 Audit trail of user actions within boards and tasks.

@@ -1,6 +1,6 @@
 # JulleyOnline — Enterprise Multi-Tenant SaaS Kanban Platform
 
-[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-114%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
+[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-118%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
 [![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-20%20Passed-blue.svg)](#test-suite-and-verification-evidence)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Prisma-indigo.svg)](#architecture-overview)
 [![Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO%20%2B%20Presence-amber.svg)](#real-time-collaboration--presence)
@@ -17,7 +17,7 @@ Evaluators can directly access all 5 key assignment deliverables below:
 2. **Database Architecture & ER Diagram:** [`docs/er-diagram.md`](docs/er-diagram.md) — 8-entity Mermaid ER diagram, foreign keys, constraints, and cascade policies.
 3. **API & Real-Time WebSocket Documentation:** [`docs/api-documentation.md`](docs/api-documentation.md) — Complete REST endpoints, Zod schemas, OCC error payloads, and Socket.IO events.
 4. **Requirement Traceability Matrix (RTM):** [`docs/requirement-traceability-matrix.md`](docs/requirement-traceability-matrix.md) — Comprehensive matrix mapping requirements to source files, tests, and verification evidence.
-5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 125 passing automated tests across normal, boundary, security, and concurrency categories.
+5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 138 passing automated tests across normal, boundary, security, and concurrency categories.
 
 ## Table of Contents
 
@@ -62,7 +62,7 @@ Evaluators can directly access all 5 key assignment deliverables below:
 
 ### Technology Stack
 
-- **Frontend:** React 18, Vite 6, Tailwind CSS v4, `@dnd-kit/core` & `@dnd-kit/sortable`, `socket.io-client`, Lucide Icons.
+- **Frontend:** React 18, Vite 6, Tailwind CSS v3, `@dnd-kit/core` & `@dnd-kit/sortable`, `socket.io-client`, Lucide Icons.
 - **Backend:** Node.js v20 (ES Modules), Express 4, `socket.io` v4, Zod schema validation, bcryptjs, jsonwebtoken, express-rate-limit.
 - **Database & ORM:** PostgreSQL 16 (Port 5433 / 5432), Prisma ORM 5.22.
 - **Testing & Verification:** Node.js native test runner (`node --test`), Playwright Browser Automation (`@playwright/test` on Microsoft Edge / Chromium).
@@ -315,9 +315,9 @@ Password for all pre-seeded accounts: **`password123`**
 
 ## Test Suite and Verification Evidence
 
-JulleyOnline includes **134 fully automated positive, negative, security, and concurrency tests**:
+JulleyOnline includes **138 fully automated positive, negative, security, and concurrency tests**:
 
-### Running Backend Tests (114 Tests)
+### Running Backend Tests (118 Tests)
 
 ```bash
 cd backend
@@ -325,10 +325,11 @@ pnpm test
 ```
 *Executes against isolated test database `julleyonline_kanban_test` on dedicated port 5001.*
 
+- **Database Safety Guard (1 test):** Validates PostgreSQL connection URL parsing without side effects, shielding development and production databases.
 - **Phase 1A: Backend Foundation (9 tests):** Config validation, test DB safety guard, health check, custom domain error handlers.
 - **Phase 1B: Authentication & RBAC (29 tests):** Registration atomicity, auto slug generation, empty slug tolerance, non-alphanumeric rejection, bcrypt hashing, JWT tampering, dynamic membership revocation, Org Admin effectiveRole preservation.
-- **Phase 2A: Organization & Tenant Management (28 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit, serialized concurrent Org Admin protection.
-- **Phase 2B: Boards, Columns & OCC (37 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization, concurrent column creation serialization, column deletion locking.
+- **Phase 2A: Organization & Tenant Management (29 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit, serialized concurrent Org Admin protection (2-admin and 3-admin overlapping races).
+- **Phase 2B: Boards, Columns & OCC (39 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization, concurrent column creation serialization, column deletion locking, true column deletion vs task creation concurrency (Scenarios A & B).
 - **Phase 4: Socket.IO & Collaboration (11 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts, immediate WebSocket revocation, tenant room switching.
 
 ### Running Frontend Playwright Tests (20 Tests)
