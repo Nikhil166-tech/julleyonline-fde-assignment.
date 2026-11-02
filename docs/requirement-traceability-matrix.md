@@ -40,8 +40,8 @@
 
 ## 2. Test Execution Summary
 
-- **Total Backend Automated Tests:** 118 Passed (0 Failed, 0 Skipped)
-- **Total Frontend Playwright E2E Tests:** 20 Passed (0 Failed, 0 Skipped)
+- **Total Backend Automated Tests:** 117 Passed (0 Failed, 0 Skipped)
+- **Total Frontend Playwright E2E Tests:** 21 Passed (0 Failed, 0 Skipped)
 - **Total Screenshot Capture Specs:** 2 Passed (9 high-fidelity screenshots in `docs/`)
 - **Combined Test Count:** **138 Automated Tests** Passing with 100% Deterministic Execution Evidence.
 - **Baseline Development Database:** Exactly 4 boards preserved in `julleyonline_kanban`. Zero test pollution.

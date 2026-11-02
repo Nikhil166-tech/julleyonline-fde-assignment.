@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
-import { validateTestDatabaseUrl } from './test-db-guard.js';
+import { validateTestDatabaseUrl } from '../src/utils/testDbGuard.js';
 
 const baseDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/julleyonline_kanban?schema=public';
 const testDbUrl =

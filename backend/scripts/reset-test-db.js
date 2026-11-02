@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { fileURLToPath } from 'url';
-import { validateTestDatabaseUrl } from './test-db-guard.js';
+import { validateTestDatabaseUrl } from '../src/utils/testDbGuard.js';
 
 export { validateTestDatabaseUrl };
 

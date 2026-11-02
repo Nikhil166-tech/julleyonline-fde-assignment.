@@ -184,11 +184,17 @@ export function DashboardPage() {
   const boardSnapshotSeq = useRef(0);
   const mutationRevision = useRef(0);
   const deletedTaskIds = useRef(new Set());
+  const taskVersionMap = useRef(new Map());
   const resyncTimeoutRef = useRef(null);
+
+  const invalidateSnapshots = useCallback(() => {
+    mutationRevision.current++;
+  }, []);
 
   useEffect(() => {
     currentBoardIdRef.current = currentBoardId;
     deletedTaskIds.current.clear();
+    taskVersionMap.current.clear();
   }, [currentBoardId]);
 
   useEffect(() => {
@@ -256,6 +262,17 @@ export function DashboardPage() {
             tasks: (col.tasks || []).filter((t) => !deletedTaskIds.current.has(t.id)),
           }));
 
+          // Synchronously index authoritative versions
+          taskVersionMap.current.clear();
+          for (const col of sanitizedColumns) {
+            for (const t of col.tasks || []) {
+              taskVersionMap.current.set(t.id, {
+                version: t.version,
+                updatedAt: new Date(t.updatedAt).getTime() || 0,
+              });
+            }
+          }
+
           setBoard({
             ...res.data,
             columns: sanitizedColumns,
@@ -320,27 +337,37 @@ export function DashboardPage() {
       if (payload.boardId && payload.boardId !== currentBoardId) return;
       if (deletedTaskIds.current.has(payload.task.id)) return;
 
-      mutationRevision.current++;
+      const incomingTask = payload.task;
+      const existing = taskVersionMap.current.get(incomingTask.id);
+      if (existing && incomingTask.version < existing.version) {
+        return;
+      }
+
+      taskVersionMap.current.set(incomingTask.id, {
+        version: incomingTask.version,
+        updatedAt: new Date(incomingTask.updatedAt).getTime() || 0,
+      });
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
         const exists = prev.columns?.some((c) =>
-          c.tasks?.some((t) => t.id === payload.task.id)
+          c.tasks?.some((t) => t.id === incomingTask.id)
         );
         if (exists) {
           return {
             ...prev,
             columns: prev.columns.map((c) => ({
               ...c,
-              tasks: c.tasks.map((t) => (t.id === payload.task.id ? payload.task : t)),
+              tasks: c.tasks.map((t) => (t.id === incomingTask.id ? incomingTask : t)),
             })),
           };
         }
         return {
           ...prev,
           columns: prev.columns.map((col) => {
-            if (col.id === payload.task.columnId) {
-              const tasks = [...(col.tasks || []), payload.task].sort(
+            if (col.id === incomingTask.columnId) {
+              const tasks = [...(col.tasks || []), incomingTask].sort(
                 (a, b) => a.position - b.position
               );
               return { ...col, tasks };
@@ -357,44 +384,30 @@ export function DashboardPage() {
 
       const incomingTask = payload.task;
 
-      // 8. Do not resurrect tasks that have already been deleted
+      // 1. Do not resurrect tasks that have already been deleted
       if (deletedTaskIds.current.has(incomingTask.id)) return;
 
-      let wasApplied = false;
+      // 2. Synchronous version check against local version cache
+      const existing = taskVersionMap.current.get(incomingTask.id);
+      if (existing) {
+        if (incomingTask.version < existing.version) {
+          return; // Reject older task updates strictly for this specific task
+        }
+        const incomingTime = new Date(incomingTask.updatedAt).getTime() || 0;
+        if (incomingTask.version === existing.version && existing.updatedAt >= incomingTime) {
+          return; // Discard duplicate/older timestamp for identical version
+        }
+      }
+
+      // Synchronously record new version and invalidate in-flight snapshots
+      taskVersionMap.current.set(incomingTask.id, {
+        version: incomingTask.version,
+        updatedAt: new Date(incomingTask.updatedAt).getTime() || 0,
+      });
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
-
-        // 1. Locate specific task in local state
-        let existingTask = null;
-        for (const col of prev.columns || []) {
-          const found = col.tasks?.find((t) => t.id === incomingTask.id);
-          if (found) {
-            existingTask = found;
-            break;
-          }
-        }
-
-        // Do not resurrect unlisted or deleted tasks on update
-        if (!existingTask) {
-          return prev;
-        }
-
-        // 2 & 5. Reject older task updates strictly for this specific task
-        if (incomingTask.version < existingTask.version) {
-          return prev;
-        }
-
-        // Discard duplicate events for identical version
-        if (
-          incomingTask.version === existingTask.version &&
-          existingTask.updatedAt >= incomingTask.updatedAt
-        ) {
-          return prev;
-        }
-
-        wasApplied = true;
-
         return {
           ...prev,
           columns: prev.columns.map((col) => ({
@@ -406,16 +419,12 @@ export function DashboardPage() {
         };
       });
 
-      // 6. Ensure selected task drawer state also rejects stale updates
+      // Ensure selected task drawer state also updates if viewing this task
       setSelectedTask((prevSelected) => {
         if (!prevSelected || prevSelected.id !== incomingTask.id) return prevSelected;
         if (incomingTask.version < prevSelected.version) return prevSelected;
         return incomingTask;
       });
-
-      if (wasApplied) {
-        mutationRevision.current++;
-      }
     };
 
     const handleTaskMovedSocket = (payload) => {
@@ -425,33 +434,24 @@ export function DashboardPage() {
       const movedTask = payload.task;
       const targetColId = payload.targetColumnId || movedTask.columnId;
 
-      // 8. Do not resurrect tasks that have already been deleted
+      // 1. Do not resurrect tasks that have already been deleted
       if (deletedTaskIds.current.has(movedTask.id)) return;
 
-      let wasApplied = false;
+      // 2. Synchronous version check against local version cache
+      const existing = taskVersionMap.current.get(movedTask.id);
+      if (existing && movedTask.version < existing.version) {
+        return; // Ignore stale socket move event
+      }
+
+      // Synchronously record new version and invalidate in-flight snapshots
+      taskVersionMap.current.set(movedTask.id, {
+        version: movedTask.version,
+        updatedAt: new Date(movedTask.updatedAt).getTime() || 0,
+      });
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
-
-        // Check if incoming version is older than existing version
-        let existingTask = null;
-        for (const col of prev.columns || []) {
-          const found = col.tasks?.find((t) => t.id === movedTask.id);
-          if (found) {
-            existingTask = found;
-            break;
-          }
-        }
-
-        if (!existingTask) {
-          return prev;
-        }
-
-        if (movedTask.version < existingTask.version) {
-          return prev; // Ignore stale socket event
-        }
-
-        wasApplied = true;
 
         const cleanColumns = prev.columns.map((c) => ({
           ...c,
@@ -478,11 +478,8 @@ export function DashboardPage() {
         return movedTask;
       });
 
-      if (wasApplied) {
-        mutationRevision.current++;
-        // Reconcile all sibling positions authoritatively in background
-        fetchBoardSnapshot(currentBoardId);
-      }
+      // Synchronously trigger background authoritative snapshot reconciliation for sibling positions
+      fetchBoardSnapshot(currentBoardId);
     };
 
     const handleTaskDeletedSocket = (payload) => {
@@ -490,7 +487,8 @@ export function DashboardPage() {
       if (payload.boardId && payload.boardId !== currentBoardId) return;
 
       deletedTaskIds.current.add(payload.taskId);
-      mutationRevision.current++;
+      taskVersionMap.current.delete(payload.taskId);
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
@@ -512,7 +510,7 @@ export function DashboardPage() {
       if (!payload?.column || isDuplicateEvent(payload.eventId)) return;
       if (payload.boardId && payload.boardId !== currentBoardId) return;
 
-      mutationRevision.current++;
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
@@ -530,7 +528,7 @@ export function DashboardPage() {
       if (!payload?.column || isDuplicateEvent(payload.eventId)) return;
       if (payload.boardId && payload.boardId !== currentBoardId) return;
 
-      mutationRevision.current++;
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
@@ -551,7 +549,7 @@ export function DashboardPage() {
       if (!payload?.column || isDuplicateEvent(payload.eventId)) return;
       if (payload.boardId && payload.boardId !== currentBoardId) return;
 
-      mutationRevision.current++;
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
@@ -568,7 +566,7 @@ export function DashboardPage() {
       if (!payload?.columnId || isDuplicateEvent(payload.eventId)) return;
       if (payload.boardId && payload.boardId !== currentBoardId) return;
 
-      mutationRevision.current++;
+      invalidateSnapshots();
 
       setBoard((prev) => {
         if (!prev) return prev;
@@ -603,6 +601,12 @@ export function DashboardPage() {
   // Handler: Task Created
   const handleTaskCreated = (newTask) => {
     if (!board) return;
+    taskVersionMap.current.set(newTask.id, {
+      version: newTask.version,
+      updatedAt: new Date(newTask.updatedAt).getTime() || 0,
+    });
+    invalidateSnapshots();
+
     setBoard((prev) => {
       if (!prev) return prev;
       const alreadyExists = prev.columns?.some((c) =>
@@ -619,10 +623,8 @@ export function DashboardPage() {
       }
       const updatedColumns = prev.columns.map((col) => {
         if (col.id === newTask.columnId) {
-          return {
-            ...col,
-            tasks: [...(col.tasks || []), newTask].sort((a, b) => a.position - b.position),
-          };
+          const tasks = [...(col.tasks || []), newTask].sort((a, b) => a.position - b.position);
+          return { ...col, tasks };
         }
         return col;
       });
@@ -633,6 +635,8 @@ export function DashboardPage() {
   // Handler: Column Created
   const handleColumnCreated = (newColumn) => {
     if (!board) return;
+    invalidateSnapshots();
+
     setBoard((prev) => {
       if (!prev) return prev;
       if (prev.columns?.some((c) => c.id === newColumn.id)) return prev;
@@ -650,6 +654,7 @@ export function DashboardPage() {
     try {
       const res = await api.put(`/columns/${columnId}`, { name: newName });
       if (res?.data) {
+        invalidateSnapshots();
         setBoard((prev) => ({
           ...prev,
           columns: prev.columns.map((c) =>
@@ -666,6 +671,7 @@ export function DashboardPage() {
   const handleDeleteColumn = async (columnId) => {
     try {
       await api.delete(`/columns/${columnId}`);
+      invalidateSnapshots();
       setBoard((prev) => ({
         ...prev,
         columns: prev.columns.filter((c) => c.id !== columnId),
@@ -677,7 +683,13 @@ export function DashboardPage() {
 
   // Handler: Task Updated in Drawer
   const handleTaskUpdated = (updatedTask) => {
+    taskVersionMap.current.set(updatedTask.id, {
+      version: updatedTask.version,
+      updatedAt: new Date(updatedTask.updatedAt).getTime() || 0,
+    });
+    invalidateSnapshots();
     setSelectedTask(updatedTask);
+
     setBoard((prev) => {
       const updatedColumns = prev.columns.map((col) => {
         if (col.id === updatedTask.columnId) {
@@ -694,7 +706,11 @@ export function DashboardPage() {
 
   // Handler: Task Deleted in Drawer
   const handleTaskDeleted = (deletedTaskId) => {
+    deletedTaskIds.current.add(deletedTaskId);
+    taskVersionMap.current.delete(deletedTaskId);
+    invalidateSnapshots();
     setSelectedTask(null);
+
     setBoard((prev) => {
       const updatedColumns = prev.columns.map((col) => ({
         ...col,
@@ -706,6 +722,13 @@ export function DashboardPage() {
 
   // Handler: Conflict Refresh Action
   const handleConflictRefresh = (authoritativeTask) => {
+    if (authoritativeTask?.id) {
+      taskVersionMap.current.set(authoritativeTask.id, {
+        version: authoritativeTask.version,
+        updatedAt: new Date(authoritativeTask.updatedAt).getTime() || 0,
+      });
+    }
+    invalidateSnapshots();
     fetchBoardSnapshot(currentBoardId);
     setSelectedTask(authoritativeTask);
   };
@@ -775,7 +798,8 @@ export function DashboardPage() {
     // Save snapshot for rollback on network or concurrency failure
     const previousBoard = JSON.parse(JSON.stringify(board));
 
-    // 1. Optimistic UI update
+    // 1. Optimistic UI update & Invalidation
+    invalidateSnapshots();
     setBoard((prev) => {
       const newColumns = prev.columns.map((col) => ({
         ...col,
@@ -818,6 +842,12 @@ export function DashboardPage() {
       });
 
       if (res?.data) {
+        taskVersionMap.current.set(res.data.id, {
+          version: res.data.version,
+          updatedAt: new Date(res.data.updatedAt).getTime() || 0,
+        });
+        invalidateSnapshots();
+
         // Record reversible action for Undo/Redo
         recordAction({
           type: 'TASK_MOVE',
@@ -826,20 +856,34 @@ export function DashboardPage() {
           boardId: board.id,
           expectedVersion: res.data.version,
           executeReversal: async (expectedVersion) => {
+            invalidateSnapshots();
             const rollbackRes = await api.post(`/tasks/${draggedTask.id}/move`, {
               targetColumnId: sourceCol.id,
               newPosition: draggedTask.position,
               version: expectedVersion,
             });
+            if (rollbackRes?.data) {
+              taskVersionMap.current.set(rollbackRes.data.id, {
+                version: rollbackRes.data.version,
+                updatedAt: new Date(rollbackRes.data.updatedAt).getTime() || 0,
+              });
+            }
             fetchBoardSnapshot(board.id);
             return rollbackRes.data;
           },
           executeForward: async (expectedVersion) => {
+            invalidateSnapshots();
             const fwdRes = await api.post(`/tasks/${draggedTask.id}/move`, {
               targetColumnId: targetCol.id,
               newPosition: targetIndex,
               version: expectedVersion,
             });
+            if (fwdRes?.data) {
+              taskVersionMap.current.set(fwdRes.data.id, {
+                version: fwdRes.data.version,
+                updatedAt: new Date(fwdRes.data.updatedAt).getTime() || 0,
+              });
+            }
             fetchBoardSnapshot(board.id);
             return fwdRes.data;
           },
@@ -856,7 +900,8 @@ export function DashboardPage() {
       }
     } catch (err) {
       console.error('Task move failed:', err);
-      // Rollback optimistic state
+      // Rollback optimistic state & Invalidate
+      invalidateSnapshots();
       setBoard(previousBoard);
 
       if (err.statusCode === 409) {

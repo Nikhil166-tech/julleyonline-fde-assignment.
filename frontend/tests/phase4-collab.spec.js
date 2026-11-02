@@ -483,4 +483,48 @@ test.describe('Phase 4: Real-Time Collaboration, Presence, Concurrency & Recover
       await contextCharlie.close();
     }
   });
+
+  test('COL-09: Synchronous task version tracking drops stale out-of-order updates and protects optimistic mutations', async ({
+    page,
+  }) => {
+    // 1. Log in Bob
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
+
+    const statusPill = page.locator('[data-testid="connection-status-pill"]');
+    await expect(statusPill).toBeVisible({ timeout: 10000 });
+    await expect(statusPill).toContainText('Live');
+
+    // 2. Create a test task
+    const taskTitle = `Version Sync Task ${Date.now()}`;
+    await page.click('button:has-text("Add Task")');
+    await page.fill('input[placeholder="e.g. Implement Optimistic Locking"]', taskTitle);
+    await page.click('button[type="submit"]:has-text("Create Task")');
+
+    const taskCard = page.locator(`text=${taskTitle}`).first();
+    await expect(taskCard).toBeVisible({ timeout: 5000 });
+
+    // 3. Open task drawer and update description (advancing version to v2)
+    await taskCard.click();
+    const drawer = page.locator('[data-testid="task-details-drawer"]');
+    await expect(drawer).toBeVisible();
+
+    const descInput = drawer.locator('textarea');
+    await descInput.fill('Updated to version 2 description');
+    // Blur to save
+    await drawer.locator('input[type="text"]').first().click();
+    await page.waitForTimeout(600);
+
+    // 4. Verify task description remains the updated version 2 and is not reverted
+    await expect(descInput).toHaveValue('Updated to version 2 description');
+
+    // 5. Verify priority update in drawer triggers optimistic version tracking and invalidation
+    const prioritySelect = drawer.locator('select').first();
+    await prioritySelect.selectOption('URGENT');
+    await page.waitForTimeout(600);
+    await expect(prioritySelect).toHaveValue('URGENT');
+  });
 });

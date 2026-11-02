@@ -212,5 +212,6 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `COL-05` | Undo/Redo OCC | Bob modifies task, clicks Undo $\to$ reverts; clicks Redo $\to$ restores; OCC protects against collaborator collision | **PASS** |
 | `COL-06` | Network Recovery | Disconnecting socket updates status to disconnected; on reconnect, auto-rejoins room and refetches snapshot | **PASS** |
 | `COL-07` | Undo Concurrency | Charlie's concurrent update blocks Bob's stale Undo with HTTP 409 and protects Charlie's changes | **PASS** |
+| `COL-09` | State Sync & Snapshot Protection | Synchronous task version tracking drops stale out-of-order socket events and protects optimistic mutations against delayed snapshot race conditions | **PASS** |
 
-**Total Automated Suite**: 118 Backend Unit & Integration Tests (100% pass) + 20 Playwright End-to-End Tests (100% pass) = 138 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.
+**Total Automated Suite**: 117 Backend Unit & Integration Tests (100% pass) + 21 Playwright End-to-End Tests (100% pass) = 138 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.

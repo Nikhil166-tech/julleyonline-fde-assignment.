@@ -69,7 +69,7 @@ describe('Phase 1A: Backend Foundation Test Suite', () => {
     });
 
     it('TC-SAF-01: validateTestDatabaseUrl allows julleyonline_kanban_test and safely rejects dev, prod, or spoofed URLs without side effects', async () => {
-      const { validateTestDatabaseUrl } = await import('../scripts/test-db-guard.js');
+      const { validateTestDatabaseUrl } = await import('../src/utils/testDbGuard.js');
 
       // 1. Valid test DB URL is accepted
       assert.equal(
