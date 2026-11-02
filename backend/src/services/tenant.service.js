@@ -1,14 +1,16 @@
 import { prisma } from '../config/prisma.js';
-import { ConflictError, NotFoundError, ForbiddenError, BadRequestError } from '../errors/AppError.js';
+import { ConflictError, NotFoundError, ForbiddenError, BadRequestError, ValidationError } from '../errors/AppError.js';
 import { Role } from '@prisma/client';
 
 function slugify(text) {
+  if (!text || typeof text !== 'string') return '';
   return text
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
 }
 
 export class TenantService {
@@ -30,7 +32,12 @@ export class TenantService {
       throw new ForbiddenError('Access forbidden: Only Organization Administrators can create tenants');
     }
 
-    const tenantSlug = slug || slugify(name);
+    const rawTenantSlug = slug ? String(slug).trim() : slugify(name);
+    const tenantSlug = rawTenantSlug.slice(0, 100);
+
+    if (!tenantSlug || tenantSlug.length < 2 || !/[a-z0-9]/i.test(tenantSlug)) {
+      throw new ValidationError('Cannot generate a valid slug from the provided name. Name must contain alphanumeric characters.');
+    }
 
     // 2. Uniqueness check within the organization
     const existing = await prisma.tenant.findUnique({
@@ -112,24 +119,38 @@ export class TenantService {
       throw new NotFoundError('Tenant workspace not found');
     }
 
-    // Check permission: either tenant member or parent org admin
-    const membership = await prisma.membership.findFirst({
+    // Check permission: Org Admin has supreme access across all tenants in org
+    const orgAdminMem = await prisma.membership.findFirst({
       where: {
         userId,
-        OR: [
-          { tenantId: tenant.id },
-          { orgId: tenant.orgId, tenantId: null, role: Role.ORG_ADMIN },
-        ],
+        orgId: tenant.orgId,
+        tenantId: null,
+        role: Role.ORG_ADMIN,
       },
     });
 
-    if (!membership) {
+    let effectiveRole = null;
+    if (orgAdminMem) {
+      effectiveRole = Role.ORG_ADMIN;
+    } else {
+      const tenantMem = await prisma.membership.findFirst({
+        where: {
+          userId,
+          tenantId: tenant.id,
+        },
+      });
+      if (tenantMem) {
+        effectiveRole = tenantMem.role;
+      }
+    }
+
+    if (!effectiveRole) {
       throw new ForbiddenError('Access forbidden: You do not have access to this tenant workspace');
     }
 
     return {
       ...tenant,
-      effectiveRole: membership.role,
+      effectiveRole,
     };
   }
 
@@ -159,6 +180,11 @@ export class TenantService {
 
     // Check slug collision if changing
     if (slug && slug !== tenant.slug) {
+      const rawSlug = String(slug).trim();
+      if (!rawSlug || rawSlug.length < 2 || !/[a-z0-9]/i.test(rawSlug)) {
+        throw new ValidationError('Tenant slug must contain at least 2 alphanumeric characters.');
+      }
+
       const existing = await prisma.tenant.findUnique({
         where: {
           orgId_slug: {

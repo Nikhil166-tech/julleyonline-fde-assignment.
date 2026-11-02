@@ -1273,5 +1273,48 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
       const positions = reordered.map((t) => t.position);
       assert.deepEqual(positions, [0, 1, 2, 3, 4], 'Positions must remain densely contiguous after move');
     });
+
+    it('TC-MOV-CONC-03: Simultaneous column creations on the same board serialize via parent board lock and produce unique contiguous positions', async () => {
+      const { ColumnService } = await import('../src/services/column.service.js');
+
+      // Dispatch 4 concurrent column creations
+      const results = await Promise.all([
+        ColumnService.createColumn(acmeEngTenant.id, testBoardId, bobUser.id, { name: `Col A ${Date.now()}` }),
+        ColumnService.createColumn(acmeEngTenant.id, testBoardId, bobUser.id, { name: `Col B ${Date.now()}` }),
+        ColumnService.createColumn(acmeEngTenant.id, testBoardId, bobUser.id, { name: `Col C ${Date.now()}` }),
+        ColumnService.createColumn(acmeEngTenant.id, testBoardId, bobUser.id, { name: `Col D ${Date.now()}` }),
+      ]);
+
+      const createdIds = results.map((c) => c.id);
+      const cols = await prisma.column.findMany({
+        where: { id: { in: createdIds } },
+        orderBy: { position: 'asc' },
+      });
+
+      const positions = cols.map((c) => c.position);
+      // Positions must be strictly ascending with no duplicates
+      const uniquePositions = new Set(positions);
+      assert.equal(uniquePositions.size, 4, 'All 4 column positions must be distinct');
+      assert.equal(positions[1], positions[0] + 1);
+      assert.equal(positions[2], positions[1] + 1);
+      assert.equal(positions[3], positions[2] + 1);
+
+      // Clean up test columns
+      await prisma.column.deleteMany({ where: { id: { in: createdIds } } });
+    });
+
+    it('TC-MOV-CONC-04: Non-empty column deletion is rejected under column row lock', async () => {
+      const { ColumnService } = await import('../src/services/column.service.js');
+
+      // Attempt deleting column with tasks (concColId has tasks from TC-MOV-CONC-01)
+      await assert.rejects(
+        () => ColumnService.deleteColumn(acmeEngTenant.id, concColId, bobUser.id),
+        (err) => {
+          assert.equal(err.name, 'ValidationError');
+          assert.match(err.message, /Cannot delete column containing \d+ task\(s\)/);
+          return true;
+        }
+      );
+    });
   });
 });

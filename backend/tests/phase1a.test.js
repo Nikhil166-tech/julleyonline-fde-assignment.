@@ -67,6 +67,26 @@ describe('Phase 1A: Backend Foundation Test Suite', () => {
         /JWT_SECRET must be at least 16 characters long/
       );
     });
+
+    it('TC-SAF-01: validateTestDatabaseUrl allows julleyonline_kanban_test and rejects dev or prod databases', async () => {
+      const { validateTestDatabaseUrl } = await import('../scripts/reset-test-db.js');
+      assert.equal(
+        validateTestDatabaseUrl('postgresql://postgres:postgres@localhost:5433/julleyonline_kanban_test?schema=public'),
+        'julleyonline_kanban_test'
+      );
+      assert.throws(
+        () => validateTestDatabaseUrl('postgresql://postgres:postgres@localhost:5433/julleyonline_kanban?schema=public'),
+        /CRITICAL SAFETY ABORT/
+      );
+      assert.throws(
+        () => validateTestDatabaseUrl('postgresql://postgres:postgres@localhost:5433/postgres'),
+        /CRITICAL SAFETY ABORT/
+      );
+      assert.throws(
+        () => validateTestDatabaseUrl('postgresql://prod-db:5432/julleyonline_kanban?test=true'),
+        /CRITICAL SAFETY ABORT/
+      );
+    });
   });
 
   // -------------------------------------------------------------

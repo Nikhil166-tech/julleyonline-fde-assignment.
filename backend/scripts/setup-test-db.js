@@ -8,6 +8,12 @@ const testDbUrl =
     ? baseDbUrl
     : baseDbUrl.replace(/(\/[^/?]+)(\?.*)?$/, '$1_test$2'));
 
+const parsedTestUrl = new URL(testDbUrl);
+const testDbName = parsedTestUrl.pathname.replace(/^\//, '').split('?')[0];
+if (testDbName !== 'julleyonline_kanban_test') {
+  throw new Error(`CRITICAL SAFETY ABORT: setup-test-db.js resolved invalid test database: ${testDbName}`);
+}
+
 const devPrisma = new PrismaClient({
   datasources: {
     db: { url: baseDbUrl },

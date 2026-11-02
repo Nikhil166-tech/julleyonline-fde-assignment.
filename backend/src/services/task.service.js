@@ -41,6 +41,14 @@ export class TaskService {
       // Lock target column to serialize concurrent creations and prevent position collisions
       await tx.$executeRaw`SELECT 1 FROM columns WHERE id = ${columnId}::uuid FOR UPDATE`;
 
+      // Re-verify target column exists under lock
+      const lockedCol = await tx.column.findFirst({
+        where: { id: columnId, tenantId, boardId },
+      });
+      if (!lockedCol) {
+        throw new ValidationError('Target column not found on this board or tenant workspace');
+      }
+
       const lastTask = await tx.task.findFirst({
         where: { columnId },
         orderBy: { position: 'desc' },

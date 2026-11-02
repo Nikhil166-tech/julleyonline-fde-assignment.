@@ -1,16 +1,18 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/prisma.js';
 import { signToken } from '../utils/jwt.js';
-import { ConflictError, UnauthorizedError, NotFoundError } from '../errors/AppError.js';
+import { ConflictError, UnauthorizedError, NotFoundError, ValidationError } from '../errors/AppError.js';
 import { Role } from '@prisma/client';
 
 function slugify(text) {
+  if (!text || typeof text !== 'string') return '';
   return text
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
 }
 
 export class AuthService {
@@ -31,7 +33,17 @@ export class AuthService {
     organizationSlug,
     tenantName,
   }) {
-    const slug = organizationSlug || slugify(organizationName);
+    const rawOrgSlug = organizationSlug ? String(organizationSlug).trim() : slugify(organizationName);
+    const slug = rawOrgSlug.slice(0, 100);
+    if (!slug || slug.length < 2 || !/[a-z0-9]/i.test(slug)) {
+      throw new ValidationError('Cannot generate a valid organization slug from the provided name. Name must contain alphanumeric characters.');
+    }
+
+    const rawTenantSlug = tenantName ? slugify(tenantName) : 'general';
+    const tenantSlug = rawTenantSlug.slice(0, 100);
+    if (!tenantSlug || tenantSlug.length < 2 || !/[a-z0-9]/i.test(tenantSlug)) {
+      throw new ValidationError('Cannot generate a valid workspace slug from the provided name. Name must contain alphanumeric characters.');
+    }
 
     // Uniqueness pre-checks
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -66,12 +78,11 @@ export class AuthService {
       });
 
       // 3. Create Default Tenant
-      const defaultTenantSlug = slugify(tenantName || 'general');
       const tenant = await tx.tenant.create({
         data: {
           orgId: organization.id,
           name: tenantName || 'General Workspace',
-          slug: defaultTenantSlug,
+          slug: tenantSlug,
         },
       });
 

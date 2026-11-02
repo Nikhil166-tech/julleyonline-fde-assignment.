@@ -1,14 +1,16 @@
 import { prisma } from '../config/prisma.js';
-import { ConflictError, NotFoundError, ForbiddenError, BadRequestError } from '../errors/AppError.js';
+import { ConflictError, NotFoundError, ForbiddenError, BadRequestError, ValidationError } from '../errors/AppError.js';
 import { Role } from '@prisma/client';
 
 function slugify(text) {
+  if (!text || typeof text !== 'string') return '';
   return text
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
 }
 
 export class OrgService {
@@ -16,7 +18,12 @@ export class OrgService {
    * Create a new organization for an authenticated user
    */
   static async createOrganization(userId, { name, slug }) {
-    const orgSlug = slug || slugify(name);
+    const rawOrgSlug = slug ? String(slug).trim() : slugify(name);
+    const orgSlug = rawOrgSlug.slice(0, 100);
+
+    if (!orgSlug || orgSlug.length < 2 || !/[a-z0-9]/i.test(orgSlug)) {
+      throw new ValidationError('Cannot generate a valid slug from the provided name. Name must contain alphanumeric characters.');
+    }
 
     const existingOrg = await prisma.organization.findUnique({
       where: { slug: orgSlug },

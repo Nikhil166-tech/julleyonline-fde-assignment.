@@ -10,6 +10,11 @@ export function ActivityPage() {
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // Reset board filter when switching tenant workspaces
+  useEffect(() => {
+    setSelectedBoardId('');
+  }, [activeTenant?.id]);
+
   // Load available boards for filtering
   useEffect(() => {
     async function loadBoards() {

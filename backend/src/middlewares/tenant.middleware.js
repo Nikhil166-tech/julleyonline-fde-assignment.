@@ -27,32 +27,30 @@ export async function requireTenantContext(req, res, next) {
     }
 
     // 2. Resolve user membership
-    // Check tenant-specific membership first
-    let membership = await prisma.membership.findFirst({
+    // Check if user is an Org Admin with org-level membership (tenantId = null) first (supreme access across all tenants)
+    const orgAdminMembership = await prisma.membership.findFirst({
       where: {
         userId: req.user.id,
-        tenantId: tenant.id,
+        orgId: tenant.orgId,
+        tenantId: null,
+        role: Role.ORG_ADMIN,
       },
     });
 
-    // If not found, check if user is an Org Admin with org-level membership (tenantId = null)
-    if (!membership) {
-      const orgAdminMembership = await prisma.membership.findFirst({
+    let membership = null;
+    if (orgAdminMembership) {
+      membership = {
+        ...orgAdminMembership,
+        role: Role.ORG_ADMIN,
+      };
+    } else {
+      // Check tenant-specific membership
+      membership = await prisma.membership.findFirst({
         where: {
           userId: req.user.id,
-          orgId: tenant.orgId,
-          tenantId: null,
-          role: Role.ORG_ADMIN,
+          tenantId: tenant.id,
         },
       });
-
-      if (orgAdminMembership) {
-        membership = {
-          ...orgAdminMembership,
-          // Scope effective role for this tenant session as ORG_ADMIN
-          role: Role.ORG_ADMIN,
-        };
-      }
     }
 
     if (!membership) {

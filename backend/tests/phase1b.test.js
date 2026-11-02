@@ -264,6 +264,24 @@ describe('Phase 1B: Authentication, Tenant Scoping & RBAC Comprehensive Test Sui
       assert.equal(orgInDb.tenants[0].name, 'Primary Workspace');
       assert.equal(orgInDb.memberships.length, 2); // 1 Org Admin + 1 Tenant Admin
     });
+
+    it('TC-AUT-08: rejects non-alphanumeric organization name producing empty slug with HTTP 400', async () => {
+      const res = await fetch(`${baseUrl}/api/v1/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Invalid Slug User',
+          email: `invalidslug_${Date.now()}@example.com`,
+          password: 'securePassword123',
+          organizationName: '!!!',
+        }),
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error.code, 'VALIDATION_ERROR');
+    });
   });
 
   // -------------------------------------------------------------
@@ -445,6 +463,34 @@ describe('Phase 1B: Authentication, Tenant Scoping & RBAC Comprehensive Test Sui
       assert.equal(res.status, 400);
       const data = await res.json();
       assert.equal(data.error.code, 'VALIDATION_ERROR');
+    });
+
+    it('TC-TNT-06: Org Admin assigned as Member to tenant retains effectiveRole: ORG_ADMIN', async () => {
+      const alice = await prisma.user.findUnique({ where: { email: 'alice@acme.com' } });
+      const tempMem = await prisma.membership.create({
+        data: {
+          userId: alice.id,
+          orgId: acmeOrg.id,
+          tenantId: acmeEngTenant.id,
+          role: 'MEMBER',
+        },
+      });
+
+      try {
+        const res = await fetch(`${baseUrl}/api/v1/auth/context-test`, {
+          headers: {
+            Authorization: `Bearer ${aliceToken}`,
+            'X-Tenant-ID': acmeEngTenant.id,
+          },
+        });
+
+        assert.equal(res.status, 200);
+        const data = await res.json();
+        assert.equal(data.success, true);
+        assert.equal(data.membership.role, 'ORG_ADMIN');
+      } finally {
+        await prisma.membership.delete({ where: { id: tempMem.id } });
+      }
     });
   });
 

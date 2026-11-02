@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -187,12 +187,16 @@ export function DashboardPage() {
     fetchBoardSnapshot(newBoardId);
   };
 
+  const boardSnapshotSeq = useRef(0);
+
   // 2. Fetch authoritative snapshot of selected board
   const fetchBoardSnapshot = useCallback(
     async (boardId) => {
       if (!boardId) return;
+      const seq = ++boardSnapshotSeq.current;
       try {
         const res = await api.get(`/boards/${boardId}`);
+        if (seq !== boardSnapshotSeq.current) return; // Stale response discarded
         if (res?.data) {
           setBoard(res.data);
           // If a task is selected in the drawer, sync its data with fresh snapshot
@@ -207,8 +211,10 @@ export function DashboardPage() {
           }
         }
       } catch (err) {
-        console.error('Failed to load board snapshot:', err);
-        setError(err.message || 'Failed to load board snapshot');
+        if (seq === boardSnapshotSeq.current) {
+          console.error('Failed to load board snapshot:', err);
+          setError(err.message || 'Failed to load board snapshot');
+        }
       }
     },
     [selectedTask]
@@ -308,6 +314,20 @@ export function DashboardPage() {
 
       setBoard((prev) => {
         if (!prev) return prev;
+
+        // Check if incoming version is older than existing version
+        let existingVersion = 0;
+        for (const col of prev.columns || []) {
+          const found = col.tasks?.find((t) => t.id === movedTask.id);
+          if (found) {
+            existingVersion = found.version;
+            break;
+          }
+        }
+        if (existingVersion && movedTask.version < existingVersion) {
+          return prev; // Ignore stale socket event
+        }
+
         const cleanColumns = prev.columns.map((c) => ({
           ...c,
           tasks: (c.tasks || []).filter((t) => t.id !== movedTask.id),
@@ -330,6 +350,9 @@ export function DashboardPage() {
       setSelectedTask((prevSelected) =>
         prevSelected && prevSelected.id === movedTask.id ? movedTask : prevSelected
       );
+
+      // Reconcile all sibling positions authoritatively in background
+      fetchBoardSnapshot(currentBoardId);
     };
 
     const handleTaskDeletedSocket = (payload) => {
@@ -368,6 +391,25 @@ export function DashboardPage() {
       });
     };
 
+    const handleColumnMovedSocket = (payload) => {
+      if (!payload?.column || isDuplicateEvent(payload.eventId)) return;
+      if (payload.boardId && payload.boardId !== currentBoardId) return;
+
+      setBoard((prev) => {
+        if (!prev) return prev;
+        const exists = prev.columns.some((c) => c.id === payload.column.id);
+        if (!exists) return prev;
+        return {
+          ...prev,
+          columns: prev.columns
+            .map((c) => (c.id === payload.column.id ? { ...c, position: payload.column.position } : c))
+            .sort((a, b) => a.position - b.position),
+        };
+      });
+
+      fetchBoardSnapshot(currentBoardId);
+    };
+
     const handleColumnUpdatedSocket = (payload) => {
       if (!payload?.column || isDuplicateEvent(payload.eventId)) return;
       if (payload.boardId && payload.boardId !== currentBoardId) return;
@@ -401,6 +443,7 @@ export function DashboardPage() {
     socket.on('task:moved', handleTaskMovedSocket);
     socket.on('task:deleted', handleTaskDeletedSocket);
     socket.on('column:created', handleColumnCreatedSocket);
+    socket.on('column:moved', handleColumnMovedSocket);
     socket.on('column:updated', handleColumnUpdatedSocket);
     socket.on('column:deleted', handleColumnDeletedSocket);
 
@@ -410,6 +453,7 @@ export function DashboardPage() {
       socket.off('task:moved', handleTaskMovedSocket);
       socket.off('task:deleted', handleTaskDeletedSocket);
       socket.off('column:created', handleColumnCreatedSocket);
+      socket.off('column:moved', handleColumnMovedSocket);
       socket.off('column:updated', handleColumnUpdatedSocket);
       socket.off('column:deleted', handleColumnDeletedSocket);
     };

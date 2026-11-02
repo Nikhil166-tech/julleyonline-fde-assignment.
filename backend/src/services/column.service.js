@@ -17,7 +17,10 @@ export class ColumnService {
     }
 
     return prisma.$transaction(async (tx) => {
-      // Find current highest position
+      // Serialize column additions on this board to prevent position collisions
+      await tx.$executeRaw`SELECT 1 FROM boards WHERE id = ${boardId}::uuid FOR UPDATE`;
+
+      // Find current highest position under board lock
       const lastColumn = await tx.column.findFirst({
         where: { boardId, tenantId },
         orderBy: { position: 'desc' },
@@ -69,29 +72,37 @@ export class ColumnService {
    * Reorder a column within its board using atomic transaction-safe shifting
    */
   static async moveColumn(tenantId, columnId, userId, { newPosition }) {
-    const column = await prisma.column.findFirst({
+    const initialColumn = await prisma.column.findFirst({
       where: { id: columnId, tenantId },
     });
 
-    if (!column) {
+    if (!initialColumn) {
       throw new NotFoundError('Column not found in this tenant workspace');
     }
 
-    const oldPosition = column.position;
-    if (oldPosition === newPosition) {
-      return column; // No-op
-    }
-
     return prisma.$transaction(async (tx) => {
-      // Lock columns in this board to serialize concurrent reorders
-      await tx.$executeRaw`SELECT 1 FROM columns WHERE board_id = ${column.boardId}::uuid FOR UPDATE`;
+      // Serialize column modifications on this board using parent board lock
+      await tx.$executeRaw`SELECT 1 FROM boards WHERE id = ${initialColumn.boardId}::uuid FOR UPDATE`;
+
+      const column = await tx.column.findFirst({
+        where: { id: columnId, tenantId },
+      });
+
+      if (!column) {
+        throw new NotFoundError('Column not found in this tenant workspace');
+      }
+
+      const oldPosition = column.position;
+      if (oldPosition === newPosition) {
+        return column; // No-op
+      }
 
       const maxCol = await tx.column.findFirst({
         where: { boardId: column.boardId },
         orderBy: { position: 'desc' },
       });
       const maxPosition = maxCol ? maxCol.position : 0;
-      const clampedPosition = Math.min(newPosition, maxPosition);
+      const clampedPosition = Math.max(0, Math.min(newPosition, maxPosition));
 
       if (clampedPosition < oldPosition) {
         // Shift columns right
@@ -128,15 +139,29 @@ export class ColumnService {
    * Delete a column with explicit non-empty policy
    */
   static async deleteColumn(tenantId, columnId, userId) {
-    const column = await prisma.column.findFirst({
+    const initialColumn = await prisma.column.findFirst({
       where: { id: columnId, tenantId },
     });
 
-    if (!column) {
+    if (!initialColumn) {
       throw new NotFoundError('Column not found in this tenant workspace');
     }
 
     return prisma.$transaction(async (tx) => {
+      // Lock parent board to serialize column modifications
+      await tx.$executeRaw`SELECT 1 FROM boards WHERE id = ${initialColumn.boardId}::uuid FOR UPDATE`;
+
+      // Lock column row to serialize against concurrent task creations
+      await tx.$executeRaw`SELECT 1 FROM columns WHERE id = ${columnId}::uuid FOR UPDATE`;
+
+      const column = await tx.column.findFirst({
+        where: { id: columnId, tenantId },
+      });
+
+      if (!column) {
+        throw new NotFoundError('Column not found in this tenant workspace');
+      }
+
       // 1. Mandatory Policy: Check if column contains any tasks
       const taskCount = await tx.task.count({
         where: { columnId },

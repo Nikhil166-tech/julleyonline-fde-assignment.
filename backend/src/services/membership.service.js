@@ -262,47 +262,52 @@ export class MembershipService {
    * Remove an Org-level member, with strict protection against removing the LAST Org Admin
    */
   static async removeOrgMember(orgId, membershipId, actorUserId) {
-    // 1. Verify actor is Org Admin
-    const actorOrgAdmin = await prisma.membership.findFirst({
-      where: {
-        userId: actorUserId,
-        orgId,
-        tenantId: null,
-        role: Role.ORG_ADMIN,
-      },
-    });
+    return prisma.$transaction(async (tx) => {
+      // Serialize org-level administrative changes using organization row lock
+      await tx.$executeRaw`SELECT 1 FROM organizations WHERE id = ${orgId}::uuid FOR UPDATE`;
 
-    if (!actorOrgAdmin) {
-      throw new ForbiddenError('Access forbidden: Operation requires Organization Administrator privileges');
-    }
-
-    const target = await prisma.membership.findUnique({
-      where: { id: membershipId },
-    });
-
-    if (!target || target.orgId !== orgId) {
-      throw new NotFoundError('Target membership not found in this organization');
-    }
-
-    // 2. CRITICAL SECURITY RULE: If target is Org Admin, ensure not removing the last one!
-    if (target.tenantId === null && target.role === Role.ORG_ADMIN) {
-      const orgAdminCount = await prisma.membership.count({
+      // 1. Verify actor is Org Admin
+      const actorOrgAdmin = await tx.membership.findFirst({
         where: {
+          userId: actorUserId,
           orgId,
           tenantId: null,
           role: Role.ORG_ADMIN,
         },
       });
 
-      if (orgAdminCount <= 1) {
-        throw new ValidationError('Cannot remove the last Organization Administrator of the organization');
+      if (!actorOrgAdmin) {
+        throw new ForbiddenError('Access forbidden: Operation requires Organization Administrator privileges');
       }
-    }
 
-    await prisma.membership.delete({
-      where: { id: membershipId },
+      const target = await tx.membership.findUnique({
+        where: { id: membershipId },
+      });
+
+      if (!target || target.orgId !== orgId) {
+        throw new NotFoundError('Target membership not found in this organization');
+      }
+
+      // 2. CRITICAL SECURITY RULE: If target is Org Admin, ensure not removing the last one!
+      if (target.tenantId === null && target.role === Role.ORG_ADMIN) {
+        const orgAdminCount = await tx.membership.count({
+          where: {
+            orgId,
+            tenantId: null,
+            role: Role.ORG_ADMIN,
+          },
+        });
+
+        if (orgAdminCount <= 1) {
+          throw new ValidationError('Cannot remove the last Organization Administrator of the organization');
+        }
+      }
+
+      await tx.membership.delete({
+        where: { id: membershipId },
+      });
+
+      return { success: true, message: 'Organization member removed successfully' };
     });
-
-    return { success: true, message: 'Organization member removed successfully' };
   }
 }

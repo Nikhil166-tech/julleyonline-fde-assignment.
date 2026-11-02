@@ -1,6 +1,6 @@
 # JulleyOnline — Enterprise Multi-Tenant SaaS Kanban Platform
 
-[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-108%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
+[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-114%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
 [![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-20%20Passed-blue.svg)](#test-suite-and-verification-evidence)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Prisma-indigo.svg)](#architecture-overview)
 [![Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO%20%2B%20Presence-amber.svg)](#real-time-collaboration--presence)
@@ -315,9 +315,9 @@ Password for all pre-seeded accounts: **`password123`**
 
 ## Test Suite and Verification Evidence
 
-JulleyOnline includes **128 fully automated positive, negative, security, and concurrency tests**:
+JulleyOnline includes **134 fully automated positive, negative, security, and concurrency tests**:
 
-### Running Backend Tests (108 Tests)
+### Running Backend Tests (114 Tests)
 
 ```bash
 cd backend
@@ -325,10 +325,10 @@ pnpm test
 ```
 *Executes against isolated test database `julleyonline_kanban_test` on dedicated port 5001.*
 
-- **Phase 1A: Backend Foundation (8 tests):** Config validation, health check, custom domain error handlers.
-- **Phase 1B: Authentication & RBAC (27 tests):** Registration atomicity, auto slug generation, empty slug tolerance, bcrypt hashing, JWT tampering, dynamic membership revocation.
-- **Phase 2A: Organization & Tenant Management (27 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit.
-- **Phase 2B: Boards, Columns & OCC (35 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization.
+- **Phase 1A: Backend Foundation (9 tests):** Config validation, test DB safety guard, health check, custom domain error handlers.
+- **Phase 1B: Authentication & RBAC (29 tests):** Registration atomicity, auto slug generation, empty slug tolerance, non-alphanumeric rejection, bcrypt hashing, JWT tampering, dynamic membership revocation, Org Admin effectiveRole preservation.
+- **Phase 2A: Organization & Tenant Management (28 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit, serialized concurrent Org Admin protection.
+- **Phase 2B: Boards, Columns & OCC (37 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization, concurrent column creation serialization, column deletion locking.
 - **Phase 4: Socket.IO & Collaboration (11 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts, immediate WebSocket revocation, tenant room switching.
 
 ### Running Frontend Playwright Tests (20 Tests)

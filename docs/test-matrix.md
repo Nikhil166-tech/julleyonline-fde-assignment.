@@ -157,6 +157,8 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | :--- | :--- | :--- | :--- |
 | `TC-MOV-CONC-01` | Column Lock | 5 simultaneous task creations serialized via column lock yield dense unique positions `[0, 1, 2, 3, 4]` | **PASS** |
 | `TC-MOV-CONC-02` | Column Lock | Concurrent task moves re-reading position under column lock maintain dense contiguous positions | **PASS** |
+| `TC-MOV-CONC-03` | Board Lock | Simultaneous column creations on same board serialize via parent board lock producing contiguous positions | **PASS** |
+| `TC-MOV-CONC-04` | Column Lock | Non-empty column deletion is rejected under column row lock | **PASS** |
 | `TC-OCC-06` | OCC Deletion | Task deletion with stale version returns HTTP 409 Conflict, latest task state, and preserves task | **PASS** |
 | `TC-OCC-07` | OCC Deletion | Task deletion with missing version returns HTTP 400 Validation Error | **PASS** |
 | `TC-OCC-08` | OCC Deletion | Task deletion using authoritative version succeeds and maintains contiguous column ordering | **PASS** |
@@ -207,4 +209,4 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `COL-06` | Network Recovery | Disconnecting socket updates status to disconnected; on reconnect, auto-rejoins room and refetches snapshot | **PASS** |
 | `COL-07` | Undo Concurrency | Charlie's concurrent update blocks Bob's stale Undo with HTTP 409 and protects Charlie's changes | **PASS** |
 
-**Total Automated Suite**: 108 Backend Unit & Integration Tests (100% pass) + 20 Playwright End-to-End Tests (100% pass) = 128 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.
+**Total Automated Suite**: 114 Backend Unit & Integration Tests (100% pass) + 20 Playwright End-to-End Tests (100% pass) = 134 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.

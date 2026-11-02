@@ -1,13 +1,31 @@
 import { PrismaClient } from '@prisma/client';
 
-const dbUrl = process.env.DATABASE_URL;
-if (!dbUrl) {
-  throw new Error('DATABASE_URL environment variable is required to run reset-test-db.js.');
+export function validateTestDatabaseUrl(urlStr) {
+  if (!urlStr) {
+    throw new Error('DATABASE_URL environment variable is required to run reset-test-db.js.');
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(urlStr);
+  } catch (err) {
+    throw new Error(`CRITICAL SAFETY ABORT: Malformed DATABASE_URL: ${urlStr}`);
+  }
+
+  const dbName = parsed.pathname.replace(/^\//, '').split('?')[0];
+  const FORBIDDEN_DATABASES = ['julleyonline_kanban', 'postgres', 'production', 'prod'];
+
+  if (FORBIDDEN_DATABASES.includes(dbName) || dbName !== 'julleyonline_kanban_test') {
+    throw new Error(
+      `CRITICAL SAFETY ABORT: reset-test-db.js refused to execute against database "${dbName}". Strictly only "julleyonline_kanban_test" is allowed.`
+    );
+  }
+
+  return dbName;
 }
 
-if (!dbUrl.includes('test') && !dbUrl.includes('julleyonline_kanban_test')) {
-  throw new Error(`CRITICAL SAFETY ABORT: reset-test-db.js rejected unexpected target database: ${dbUrl}`);
-}
+const dbUrl = process.env.DATABASE_URL;
+validateTestDatabaseUrl(dbUrl);
 
 const prisma = new PrismaClient({
   datasources: {
@@ -23,9 +41,7 @@ const PROTECTED_BOARD_NAMES = [
 ];
 
 async function main() {
-  if (!dbUrl.includes('test') && !dbUrl.includes('julleyonline_kanban_test')) {
-    throw new Error(`CRITICAL SAFETY ABORT: reset-test-db.js rejected unexpected target database: ${dbUrl}`);
-  }
+  validateTestDatabaseUrl(dbUrl);
 
   // Find all non-seed boards
   const nonSeedBoards = await prisma.board.findMany({
