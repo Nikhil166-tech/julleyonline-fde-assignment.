@@ -128,22 +128,85 @@ export function DashboardPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canUndo, canRedo, isExecuting, undo, redo, getCurrentTask]);
 
-  // 1. Fetch available boards for active tenant
+  // Context & Concurrency tracking refs
+  const currentBoardIdRef = useRef(currentBoardId);
+  currentBoardIdRef.current = currentBoardId;
+  const activeTenantIdRef = useRef(activeTenant?.id);
+  activeTenantIdRef.current = activeTenant?.id;
+  const tenantBoardsSeq = useRef(0);
+  const tenantBoardsAbortController = useRef(null);
+  const boardSnapshotSeq = useRef(0);
+  const mutationRevision = useRef(0);
+  const deletedTaskIds = useRef(new Set());
+  const taskVersionMap = useRef(new Map());
+  const resyncTimeoutRef = useRef(null);
+
+  const invalidateSnapshots = useCallback(() => {
+    mutationRevision.current++;
+  }, []);
+
+  useEffect(() => {
+    deletedTaskIds.current.clear();
+    taskVersionMap.current.clear();
+  }, [currentBoardId]);
+
+  useEffect(() => {
+    return () => {
+      if (tenantBoardsAbortController.current) {
+        tenantBoardsAbortController.current.abort();
+      }
+      if (resyncTimeoutRef.current) {
+        clearTimeout(resyncTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // 1. Fetch available boards for active tenant with strict isolation and sequencing
   const fetchTenantBoards = useCallback(
     async (preferredBoardId = null) => {
-      if (!activeTenant?.id) return;
+      const requestTenantId = activeTenant?.id;
+      if (!requestTenantId) return;
+
+      // Abort prior in-flight request for boards
+      if (tenantBoardsAbortController.current) {
+        tenantBoardsAbortController.current.abort();
+      }
+      tenantBoardsAbortController.current = new AbortController();
+
+      const seq = ++tenantBoardsSeq.current;
+
       try {
         setLoading(true);
         setError('');
-        const res = await api.get('/boards');
+        const res = await api.get('/boards', {
+          signal: tenantBoardsAbortController.current.signal,
+        });
+
+        // Guard 1: Ignore response if active tenant has changed
+        if (requestTenantId !== activeTenantIdRef.current) {
+          return;
+        }
+
+        // Guard 2: Ignore response if a newer board request was dispatched
+        if (seq !== tenantBoardsSeq.current) {
+          return;
+        }
+
         if (res?.data) {
-          setBoards(res.data);
-          if (res.data.length > 0) {
+          // Guard 3: Guarantee only boards belonging to active tenant workspace are accepted
+          const tenantBoards = (res.data || []).filter(
+            (b) => b.tenantId === requestTenantId
+          );
+
+          setBoards(tenantBoards);
+
+          if (tenantBoards.length > 0) {
+            // Select preferred board if valid for this tenant, else matching URL board if belonging to this tenant, else first board
             const target =
-              (preferredBoardId && res.data.find((b) => b.id === preferredBoardId)) ||
-              (urlBoardId && res.data.find((b) => b.id === urlBoardId)) ||
-              (currentBoardId && res.data.find((b) => b.id === currentBoardId)) ||
-              res.data[0];
+              (preferredBoardId && tenantBoards.find((b) => b.id === preferredBoardId)) ||
+              (urlBoardId && tenantBoards.find((b) => b.id === urlBoardId)) ||
+              (currentBoardId && tenantBoards.find((b) => b.id === currentBoardId)) ||
+              tenantBoards[0];
 
             setCurrentBoardId(target.id);
             setSearchParams({ boardId: target.id }, { replace: true });
@@ -154,30 +217,63 @@ export function DashboardPage() {
           }
         }
       } catch (err) {
-        console.error('Failed to load boards:', err);
-        setError(err.message || 'Failed to load boards');
+        if (err.name === 'AbortError') return;
+
+        // Only surface error if this request still belongs to the active tenant and latest sequence
+        if (
+          requestTenantId === activeTenantIdRef.current &&
+          seq === tenantBoardsSeq.current
+        ) {
+          console.error('Failed to load boards:', err);
+          setError(err.message || 'Failed to load boards');
+        }
       } finally {
-        setLoading(false);
+        if (
+          requestTenantId === activeTenantIdRef.current &&
+          seq === tenantBoardsSeq.current
+        ) {
+          setLoading(false);
+        }
       }
     },
     [activeTenant?.id, currentBoardId, urlBoardId, setSearchParams]
   );
 
-  // Clear stale boards immediately when switching tenant to prevent cross-tenant UI bleed
+  // Clear stale boards and cancel in-flight queries immediately when switching tenant
   useEffect(() => {
+    // 1. Immediately abort prior in-flight board requests
+    if (tenantBoardsAbortController.current) {
+      tenantBoardsAbortController.current.abort();
+    }
+    tenantBoardsSeq.current++;
+    boardSnapshotSeq.current++;
+
+    // 2. Clear stale workspace and board selection
     setBoards([]);
     setBoard(null);
     setCurrentBoardId(null);
     setSelectedTask(null);
     setConflictDetails(null);
-    fetchTenantBoards();
+    setError('');
+
+    // 3. Clear URL search params to ensure old workspace's boardId is not retained
+    setSearchParams({}, { replace: true });
+
+    // 4. Trigger fetch for the newly active workspace
+    if (activeTenant?.id) {
+      fetchTenantBoards();
+    }
   }, [activeTenant?.id]);
 
   useEffect(() => {
-    if (urlBoardId && urlBoardId !== currentBoardId && boards.some((b) => b.id === urlBoardId)) {
+    if (
+      urlBoardId &&
+      urlBoardId !== currentBoardId &&
+      boards.some((b) => b.id === urlBoardId && b.tenantId === activeTenant?.id)
+    ) {
       setCurrentBoardId(urlBoardId);
     }
-  }, [urlBoardId, boards]);
+  }, [urlBoardId, boards, activeTenant?.id]);
 
   // Automatically open task details drawer if taskId is specified in URL query
   useEffect(() => {
@@ -191,37 +287,6 @@ export function DashboardPage() {
       }
     }
   }, [urlTaskId, board]);
-
-  // Context & Concurrency tracking refs
-  const currentBoardIdRef = useRef(currentBoardId);
-  const activeTenantIdRef = useRef(activeTenant?.id);
-  const boardSnapshotSeq = useRef(0);
-  const mutationRevision = useRef(0);
-  const deletedTaskIds = useRef(new Set());
-  const taskVersionMap = useRef(new Map());
-  const resyncTimeoutRef = useRef(null);
-
-  const invalidateSnapshots = useCallback(() => {
-    mutationRevision.current++;
-  }, []);
-
-  useEffect(() => {
-    currentBoardIdRef.current = currentBoardId;
-    deletedTaskIds.current.clear();
-    taskVersionMap.current.clear();
-  }, [currentBoardId]);
-
-  useEffect(() => {
-    activeTenantIdRef.current = activeTenant?.id;
-  }, [activeTenant?.id]);
-
-  useEffect(() => {
-    return () => {
-      if (resyncTimeoutRef.current) {
-        clearTimeout(resyncTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Explicit board selection from dropdown
   const handleSelectBoard = (newBoardId) => {
@@ -270,6 +335,11 @@ export function DashboardPage() {
         }
 
         if (res?.data) {
+          // Extra Guard: Ensure board data strictly belongs to currently active tenant
+          if (res.data.tenantId && res.data.tenantId !== activeTenantIdRef.current) {
+            return;
+          }
+
           // Do not resurrect tasks that were deleted locally
           const sanitizedColumns = (res.data.columns || []).map((col) => ({
             ...col,
@@ -306,7 +376,8 @@ export function DashboardPage() {
       } catch (err) {
         if (
           seq === boardSnapshotSeq.current &&
-          targetBoardId === currentBoardIdRef.current
+          targetBoardId === currentBoardIdRef.current &&
+          targetTenantId === activeTenantIdRef.current
         ) {
           console.error('Failed to load board snapshot:', err);
           setError(err.message || 'Failed to load board snapshot');

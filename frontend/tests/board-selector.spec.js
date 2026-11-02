@@ -220,4 +220,75 @@ test.describe('Board Selector, Search & Tenant Isolation Regression Suite', () =
     // Create New Board button should NOT be rendered for standard Member
     await expect(page.locator('[data-testid="board-selector-create-btn"]')).not.toBeVisible();
   });
+
+  test('SEL-07: Tenant-switching race condition: delayed board-list response from prior workspace is dropped and never triggers 403', async ({ page }) => {
+    // 1. Intercept GET /api/v1/boards requests
+    let releaseEngineeringResponse = null;
+    const engineeringDelayPromise = new Promise((resolve) => {
+      releaseEngineeringResponse = resolve;
+    });
+
+    let delayedEngineeringDispatched = false;
+    let forbiddenDetected = false;
+
+    // Track any HTTP 403 responses
+    page.on('response', (res) => {
+      if (res.status() === 403 && res.url().includes('/api/v1/boards')) {
+        forbiddenDetected = true;
+      }
+    });
+
+    await page.route('**/api/v1/boards', async (route) => {
+      const req = route.request();
+
+      // Intercept the first GET /api/v1/boards on mount (for Engineering)
+      if (req.method() === 'GET' && !delayedEngineeringDispatched) {
+        delayedEngineeringDispatched = true;
+
+        // Fetch actual response from backend under Engineering context
+        const response = await route.fetch();
+        const body = await response.text();
+
+        // Delay returning this response until after Bob switches to Marketing
+        await engineeringDelayPromise;
+
+        // Fulfill with the delayed Engineering response
+        await route.fulfill({ response, body });
+        return;
+      }
+
+      // Allow all other requests (such as for Marketing workspace) to continue immediately
+      await route.continue();
+    });
+
+    // 2. Log in as Bob (starts with Engineering workspace)
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+
+    // Wait until the Workspace switcher trigger in Header is visible
+    const tenantSwitcher = page.locator('[data-testid="tenant-switcher-trigger"]');
+    await expect(tenantSwitcher).toBeVisible();
+
+    // 3. Switch workspace from Engineering to Marketing while Engineering response is still delayed
+    await tenantSwitcher.click();
+    await page.click('[data-testid="tenant-option-marketing"]');
+    await expect(tenantSwitcher).toContainText('Marketing & Growth');
+
+    // 4. Marketing should now be active. Now release the delayed Engineering response!
+    if (releaseEngineeringResponse) {
+      releaseEngineeringResponse();
+    }
+
+    // Give time for any delayed promise/state to process
+    await page.waitForTimeout(500);
+
+    // 5. Verify Marketing remains selected and NO forbidden error or Engineering board was loaded
+    await expect(tenantSwitcher).toContainText('Marketing & Growth');
+    await expect(page.locator('text=Access forbidden: Board belongs to another tenant workspace')).not.toBeVisible();
+    await expect(page.locator('text=Sprint 1 - Core Platform MVP')).not.toBeVisible();
+    await expect(page.locator('text=No boards in this workspace')).toBeVisible();
+    expect(forbiddenDetected).toBe(false);
+  });
 });
