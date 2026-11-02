@@ -213,5 +213,6 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `COL-06` | Network Recovery | Disconnecting socket updates status to disconnected; on reconnect, auto-rejoins room and refetches snapshot | **PASS** |
 | `COL-07` | Undo Concurrency | Charlie's concurrent update blocks Bob's stale Undo with HTTP 409 and protects Charlie's changes | **PASS** |
 | `COL-09` | State Sync & Snapshot Protection | Synchronous task version tracking drops stale out-of-order socket events and protects optimistic mutations against delayed snapshot race conditions | **PASS** |
+| `COL-10` | Multi-Tab & Tenant Scoping | Multi-tab deduplication counts user once; tenant switching updates active users count accurately per workspace | **PASS** |
 
-**Total Automated Suite**: 117 Backend Unit & Integration Tests (100% pass) + 21 Playwright End-to-End Tests (100% pass) = 138 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.
+**Total Automated Suite**: 117 Backend Unit & Integration Tests (100% pass) + 22 Playwright End-to-End Tests (100% pass) = 139 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.

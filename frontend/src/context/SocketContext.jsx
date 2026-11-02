@@ -54,6 +54,7 @@ export function SocketProvider({ children }) {
 
       // Join tenant room on connect
       if (activeTenantRef.current?.id) {
+        joinedTenantIdRef.current = activeTenantRef.current.id;
         newSocket.emit('join:tenant', { tenantId: activeTenantRef.current.id }, (res) => {
           if (res?.activeUsers) {
             setActiveTenantUsers(res.activeUsers);
@@ -105,6 +106,9 @@ export function SocketProvider({ children }) {
     });
 
     newSocket.on('tenant:presence:sync', (payload) => {
+      if (payload?.tenantId && payload.tenantId !== activeTenantRef.current?.id) {
+        return;
+      }
       if (payload?.activeUsers) {
         setActiveTenantUsers(payload.activeUsers);
       }

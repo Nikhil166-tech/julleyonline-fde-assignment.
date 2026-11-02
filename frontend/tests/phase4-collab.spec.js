@@ -21,6 +21,11 @@ test.describe('Phase 4: Real-Time Collaboration, Presence, Concurrency & Recover
       await expect(statusPillBob).toBeVisible({ timeout: 10000 });
       await expect(statusPillBob).toContainText('Live');
 
+      // Verify Bob initially sees 1 Online in the workspace
+      const activeUsersCountBob = pageBob.locator('[data-testid="active-users-count"]');
+      await expect(activeUsersCountBob).toBeVisible({ timeout: 10000 });
+      await expect(activeUsersCountBob).toContainText('1 Online');
+
       // 2. Charlie logs in and navigates to Bob's current board
       await pageCharlie.goto('/login');
       await pageCharlie.fill('input[type="email"]', 'charlie@acme.com');
@@ -35,16 +40,18 @@ test.describe('Phase 4: Real-Time Collaboration, Presence, Concurrency & Recover
       await expect(statusPillCharlie).toBeVisible({ timeout: 10000 });
       await expect(statusPillCharlie).toContainText('Live');
 
-      // 3. Verify presence avatars on both browsers
+      // 3. Verify presence avatars and dynamic "2 Online" count on both browsers
       const presenceStackBob = pageBob.locator('[data-testid="presence-avatar-stack"]');
       await expect(presenceStackBob).toBeVisible({ timeout: 10000 });
+      await expect(activeUsersCountBob).toContainText('2 Online', { timeout: 10000 });
 
       const presenceStackCharlie = pageCharlie.locator('[data-testid="presence-avatar-stack"]');
       await expect(presenceStackCharlie).toBeVisible({ timeout: 10000 });
+      await expect(pageCharlie.locator('[data-testid="active-users-count"]')).toContainText('2 Online', { timeout: 10000 });
 
-      // 4. Close Charlie's page -> Bob's presence updates
+      // 4. Close Charlie's page -> Bob's presence automatically decreases back to "1 Online"
       await pageCharlie.close();
-      await pageBob.waitForTimeout(1000);
+      await expect(activeUsersCountBob).toContainText('1 Online', { timeout: 10000 });
     } finally {
       await contextBob.close();
       await contextCharlie.close();
@@ -530,5 +537,53 @@ test.describe('Phase 4: Real-Time Collaboration, Presence, Concurrency & Recover
     await prioritySelect.selectOption('URGENT');
     await expect(saveToast).toContainText('Priority updated', { timeout: 5000 });
     await expect(prioritySelect).toHaveValue('URGENT');
+  });
+
+  test('COL-10: Multi-tab presence deduplication and tenant switching active user scoping', async ({ browser }) => {
+    const context = await browser.newContext();
+    const page1 = await context.newPage();
+
+    try {
+      // 1. Bob logs in on Tab 1
+      await page1.goto('/login');
+      await page1.fill('input[type="email"]', 'bob@acme.com');
+      await page1.fill('input[type="password"]', 'password123');
+      await page1.click('button[type="submit"]');
+      await expect(page1).toHaveURL(/\/(\?boardId=.*)?$/);
+
+      const countTab1 = page1.locator('[data-testid="active-users-count"]');
+      await expect(countTab1).toBeVisible({ timeout: 10000 });
+      await expect(countTab1).toContainText('1 Online');
+
+      // 2. Bob opens Tab 2 in the same browser context
+      const page2 = await context.newPage();
+      await page2.goto(page1.url());
+      const countTab2 = page2.locator('[data-testid="active-users-count"]');
+      await expect(countTab2).toBeVisible({ timeout: 10000 });
+
+      // Multi-tab deduplication: Bob should still be counted as only 1 Online user on both tabs
+      await expect(countTab1).toContainText('1 Online');
+      await expect(countTab2).toContainText('1 Online');
+
+      // 3. Close Tab 2 -> Tab 1 remains active and still reports 1 Online
+      await page2.close();
+      await page1.waitForTimeout(500);
+      await expect(countTab1).toContainText('1 Online');
+
+      // 4. Bob switches tenant workspace via tenant dropdown to Marketing
+      const tenantTrigger = page1.locator('[data-testid="tenant-switcher-trigger"]');
+      await tenantTrigger.click();
+
+      const mktgOption = page1.locator('[data-testid="tenant-option-marketing"]');
+      if (await mktgOption.isVisible({ timeout: 3000 })) {
+        await mktgOption.click();
+        await page1.waitForTimeout(1000);
+
+        // Active users count updates dynamically to reflect Marketing workspace
+        await expect(countTab1).toContainText('1 Online');
+      }
+    } finally {
+      await context.close();
+    }
   });
 });

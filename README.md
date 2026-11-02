@@ -1,7 +1,7 @@
 # JulleyOnline — Enterprise Multi-Tenant SaaS Kanban Platform
 
 [![Backend Tests](https://img.shields.io/badge/Backend%20Tests-117%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
-[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-21%20Passed-blue.svg)](#test-suite-and-verification-evidence)
+[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-22%20Passed-blue.svg)](#test-suite-and-verification-evidence)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Prisma-indigo.svg)](#architecture-overview)
 [![Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO%20%2B%20Presence-amber.svg)](#real-time-collaboration--presence)
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite%20%2B%20Tailwind-cyan.svg)](#frontend-architecture)
@@ -17,7 +17,7 @@ Evaluators can directly access all 5 key assignment deliverables below:
 2. **Database Architecture & ER Diagram:** [`docs/er-diagram.md`](docs/er-diagram.md) — 8-entity Mermaid ER diagram, foreign keys, constraints, and cascade policies.
 3. **API & Real-Time WebSocket Documentation:** [`docs/api-documentation.md`](docs/api-documentation.md) — Complete REST endpoints, Zod schemas, OCC error payloads, and Socket.IO events.
 4. **Requirement Traceability Matrix (RTM):** [`docs/requirement-traceability-matrix.md`](docs/requirement-traceability-matrix.md) — Comprehensive matrix mapping requirements to source files, tests, and verification evidence.
-5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 138 passing automated tests across normal, boundary, security, and concurrency categories.
+5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 139 passing automated tests across normal, boundary, security, and concurrency categories.
 
 ## Table of Contents
 
@@ -315,7 +315,7 @@ Password for all pre-seeded accounts: **`password123`**
 
 ## Test Suite and Verification Evidence
 
-JulleyOnline includes **138 fully automated positive, negative, security, and concurrency tests**:
+JulleyOnline includes **139 fully automated positive, negative, security, and concurrency tests**:
 
 ### Running Backend Tests (117 Tests)
 
@@ -331,7 +331,7 @@ pnpm test
 - **Phase 2B: Boards, Columns & OCC (39 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization, concurrent column creation serialization, column deletion locking, true column deletion vs task creation concurrency (Scenarios A & B).
 - **Phase 4: Socket.IO & Collaboration (11 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts, immediate WebSocket revocation, tenant room switching.
 
-### Running Frontend Playwright Tests (21 Tests)
+### Running Frontend Playwright Tests (22 Tests)
 
 ```bash
 cd frontend
@@ -340,7 +340,7 @@ npx playwright test tests/board-selector.spec.js tests/e2e.spec.js tests/phase4-
 
 - **Board Selector & Search (`board-selector.spec.js` - 6 tests):** Real-time search by name/short ID, multiple boards with identical names, tenant isolation, RBAC controls.
 - **End-to-End Real Persistence (`e2e.spec.js` - 7 tests):** Login session hydration, Board/Task CRUD persistence across reloads, non-empty column deletion policy, Member RBAC boundary, Admin deletion controls, React browser form registration bootstrap, and versioned task deletion OCC.
-- **Real-Time Collaboration & Concurrency (`phase4-collab.spec.js` - 8 tests):** Multi-user room presence pill, real-time task creation/movement broadcast, HTTP 409 conflict modal reconciliation, Undo/Redo OCC validation, socket reconnection recovery, multi-collaborator undo rejection, synchronous task version tracking & optimistic mutation snapshot protection (`COL-09`).
+- **Real-Time Collaboration & Concurrency (`phase4-collab.spec.js` - 9 tests):** Multi-user room presence pill, real-time task creation/movement broadcast, HTTP 409 conflict modal reconciliation, Undo/Redo OCC validation, socket reconnection recovery, multi-collaborator undo rejection, synchronous task version tracking & optimistic mutation snapshot protection (`COL-09`), multi-tab presence deduplication and tenant switching active user scoping (`COL-10`).
 
 ---
 

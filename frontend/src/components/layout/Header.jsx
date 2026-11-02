@@ -28,7 +28,7 @@ export function Header({ onToggleSidebar }) {
     logout,
   } = useAuth();
 
-  const { connectionStatus, activeUsers } = useSocket();
+  const { connectionStatus, activeTenantUsers } = useSocket();
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 px-4 lg:px-6 flex items-center justify-between sticky top-0 z-30 shrink-0">
@@ -201,29 +201,37 @@ export function Header({ onToggleSidebar }) {
           <span className="capitalize">{connectionStatus === 'connected' ? 'Live' : connectionStatus}</span>
         </div>
 
-        {/* Real-time Board Presence Stack */}
-        {activeUsers.length > 0 && (
+        {/* Real-time Tenant Presence Stack */}
+        {activeTenantUsers.length > 0 && (
           <div
             data-testid="presence-avatar-stack"
-            className="hidden sm:flex items-center -space-x-2 mr-1"
-            title={`Online in this room: ${activeUsers.map((u) => u.name).join(', ')}`}
+            className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-full bg-slate-50 border border-slate-200"
+            title={`Active in ${activeTenant?.name || 'workspace'}: ${activeTenantUsers.map((u) => u.name).join(', ')}`}
           >
-            {activeUsers.slice(0, 3).map((u) => (
-              <Avatar
-                key={u.id}
-                name={u.name}
-                email={u.email}
-                avatarUrl={u.avatarUrl}
-                size="xs"
-                isOnline={true}
-                className="ring-2 ring-white"
-              />
-            ))}
-            {activeUsers.length > 3 && (
-              <span className="w-6 h-6 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-[10px] font-semibold text-slate-600">
-                +{activeUsers.length - 3}
-              </span>
-            )}
+            <div className="flex items-center -space-x-1.5">
+              {activeTenantUsers.slice(0, 3).map((u) => (
+                <Avatar
+                  key={u.id}
+                  name={u.name}
+                  email={u.email}
+                  avatarUrl={u.avatarUrl}
+                  size="xs"
+                  isOnline={true}
+                  className="ring-2 ring-white"
+                />
+              ))}
+              {activeTenantUsers.length > 3 && (
+                <span className="w-5 h-5 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-[9px] font-bold text-slate-600 select-none">
+                  +{activeTenantUsers.length - 3}
+                </span>
+              )}
+            </div>
+            <span
+              data-testid="active-users-count"
+              className="text-[11px] font-semibold text-slate-700 whitespace-nowrap pr-0.5"
+            >
+              {activeTenantUsers.length} Online
+            </span>
           </div>
         )}
         {/* Search Bar matching design reference */}
@@ -239,15 +247,12 @@ export function Header({ onToggleSidebar }) {
           </kbd>
         </div>
 
-        {/* Notifications Icon with Badge */}
+        {/* Notifications Icon */}
         <button
-          className="relative p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+          className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
           title="Notifications"
         >
           <Bell className="w-4 h-4" />
-          <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white">
-            3
-          </span>
         </button>
 
         {/* Help Icon */}
