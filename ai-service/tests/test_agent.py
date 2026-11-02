@@ -5,7 +5,15 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from schemas import WorkspaceContext, TaskItem, ColumnItem, BoardItem, ActivityItem, Metrics
+from config import settings
 import agent
+
+@pytest.fixture(autouse=True)
+def force_mock_mode_for_unit_tests():
+    old_mock = settings.MOCK_LLM
+    settings.MOCK_LLM = True
+    yield
+    settings.MOCK_LLM = old_mock
 
 @pytest.fixture
 def sample_context():

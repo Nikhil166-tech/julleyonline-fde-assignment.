@@ -75,6 +75,10 @@ def get_overdue_tasks(
 
         try:
             due = datetime.fromisoformat(t.dueDate.replace("Z", "+00:00"))
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+            if now.tzinfo is None:
+                now = now.replace(tzinfo=timezone.utc)
         except Exception:
             continue
 

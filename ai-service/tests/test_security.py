@@ -11,6 +11,13 @@ from schemas import WorkspaceContext, TaskItem, ColumnItem, Metrics
 
 client = TestClient(app)
 
+@pytest.fixture(autouse=True)
+def force_mock_mode_for_unit_tests():
+    old_mock = settings.MOCK_LLM
+    settings.MOCK_LLM = True
+    yield
+    settings.MOCK_LLM = old_mock
+
 @pytest.fixture
 def base_context_dict():
     return {
