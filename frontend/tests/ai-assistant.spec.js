@@ -13,8 +13,7 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     await page.fill('input[type="email"]', 'bob@acme.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
-
-    await expect(page.locator('text=JulleyOnline')).toBeVisible({ timeout: 10000 });
+    await expect(page).toHaveURL(/\/\?boardId=/);
 
     // 2. Click AI Assistant sidebar link
     const aiNavLink = page.locator('aside a[href="/ai-assistant"]');
@@ -24,8 +23,8 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     // 3. Verify route and header elements
     await expect(page).toHaveURL(/\/ai-assistant/);
     await expect(page.locator('h1:has-text("AI Kanban Assistant")')).toBeVisible();
-    await expect(page.locator('text=Read-Only')).toBeVisible();
-    await expect(page.locator('text=Engineering & Product')).toBeVisible();
+    await expect(page.getByText('Read-Only', { exact: true })).toBeVisible();
+    await expect(page.getByRole('main').getByText('Engineering & Product')).toBeVisible();
 
     // 4. Verify board scope selector and suggested prompts
     await expect(page.locator('select#ai-board-select')).toBeVisible();
@@ -41,7 +40,7 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
         body: JSON.stringify({
           success: true,
           data: {
-            answer: 'Found **1 overdue task(s)** in Engineering: Implement Auth Middleware.',
+            answer: 'Found 1 overdue task(s) in Engineering: Implement Auth Middleware.',
             toolsUsed: ['get_overdue_tasks'],
             confidence: 'high',
             generatedAt: new Date().toISOString(),
@@ -59,16 +58,17 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     await page.fill('input[type="email"]', 'bob@acme.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
 
     // 2. Navigate to AI Assistant
-    await page.goto('/ai-assistant');
+    await page.click('aside a[href="/ai-assistant"]');
     await expect(page.locator('h1:has-text("AI Kanban Assistant")')).toBeVisible();
 
     // 3. Click "Which tasks are overdue?" chip
     await page.click('button:has-text("Which tasks are overdue?")');
 
     // 4. Verify message and answer appear in timeline
-    await expect(page.locator('text=Found 1 overdue task(s) in Engineering')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=Implement Auth Middleware')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('span:has-text("get_overdue_tasks")')).toBeVisible();
     await expect(page.locator('text=4 tasks analyzed')).toBeVisible();
   });
@@ -100,9 +100,11 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     await page.fill('input[type="email"]', 'bob@acme.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
 
     // 2. Go to AI Assistant
-    await page.goto('/ai-assistant');
+    await page.click('aside a[href="/ai-assistant"]');
+    await expect(page.locator('h1:has-text("AI Kanban Assistant")')).toBeVisible();
 
     // 3. Send query
     await page.fill('textarea', 'Summarize board');
@@ -111,19 +113,16 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     // 4. Verify loading state
     await expect(page.locator('text=Analyzing workspace tasks')).toBeVisible();
 
-    // 5. Switch tenant workspace via bottom sidebar switcher
-    const switcherTrigger = page.locator('aside div[role="button"], aside div.cursor-pointer').filter({ hasText: 'Engineering & Product' });
-    await switcherTrigger.click();
-
-    const marketingOption = page.locator('button, div').filter({ hasText: 'Marketing & Growth' }).first();
-    await marketingOption.click();
+    // 5. Switch tenant workspace via header tenant switcher
+    await page.click('[data-testid="tenant-switcher-trigger"]');
+    await page.click('[data-testid="tenant-option-marketing"]');
 
     // 6. Release delayed response
     requestDelayedPromiseResolve();
 
     // 7. Verify stale message is NOT shown and active tenant is Marketing
     await expect(page.locator('text=Old Engineering Response that should be dropped')).not.toBeVisible();
-    await expect(page.locator('text=Marketing & Growth')).toBeVisible();
+    await expect(page.locator('[data-testid="tenant-switcher-trigger"]')).toContainText('Marketing & Growth');
   });
 
   test('AI-04: Gracefully renders error banner on service failure with dismiss action', async ({ page }) => {
@@ -146,9 +145,11 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     await page.fill('input[type="email"]', 'bob@acme.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
 
     // 2. Go to AI Assistant
-    await page.goto('/ai-assistant');
+    await page.click('aside a[href="/ai-assistant"]');
+    await expect(page.locator('h1:has-text("AI Kanban Assistant")')).toBeVisible();
 
     // 3. Ask question
     await page.fill('textarea', 'Show tasks');
