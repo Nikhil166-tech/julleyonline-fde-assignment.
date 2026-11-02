@@ -188,22 +188,35 @@ Tool Results:
 
 Please answer the user question directly and concisely in markdown based STRICTLY on the tool results above."""
 
-            response = client.models.generate_content(
-                model=settings.AI_MODEL,
-                contents=prompt,
-                config={
-                    "system_instruction": SYSTEM_INSTRUCTION,
-                    "temperature": 0.2,
-                }
-            )
+            models_to_try = [settings.AI_MODEL]
+            if settings.FALLBACK_MODEL and settings.FALLBACK_MODEL not in models_to_try:
+                models_to_try.append(settings.FALLBACK_MODEL)
 
-            if response and response.text:
-                return ChatResponse(
-                    answer=response.text,
-                    toolsUsed=tool_names,
-                    confidence="high",
-                    generatedAt=datetime.now(timezone.utc).isoformat()
-                )
+            last_error = None
+            for candidate_model in models_to_try:
+                try:
+                    response = client.models.generate_content(
+                        model=candidate_model,
+                        contents=prompt,
+                        config={
+                            "system_instruction": SYSTEM_INSTRUCTION,
+                            "temperature": 0.2,
+                        }
+                    )
+
+                    if response and response.text:
+                        return ChatResponse(
+                            answer=response.text,
+                            toolsUsed=tool_names,
+                            confidence="high",
+                            generatedAt=datetime.now(timezone.utc).isoformat()
+                        )
+                except Exception as model_err:
+                    last_error = model_err
+                    print(f"[AI Agent] Model '{candidate_model}' invocation failed: {model_err}. Trying fallback...")
+
+            if last_error:
+                print(f"[AI Agent] All candidate models failed ({last_error}), falling back to deterministic engine.")
         except Exception as err:
             # Fall back to deterministic engine gracefully on provider failure
             print(f"[AI Agent] Gemini call failed, falling back to deterministic engine: {err}")

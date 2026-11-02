@@ -7,7 +7,8 @@ class Settings(BaseSettings):
 
     AI_SERVICE_TOKEN: str = "dev-ai-service-token-secret"
     GEMINI_API_KEY: Optional[str] = None
-    AI_MODEL: str = "gemini-2.5-flash"
+    AI_MODEL: str = "gemini-3.5-flash"
+    FALLBACK_MODEL: str = "gemini-3.8-flash"
     MOCK_LLM: bool = False
     HOST: str = "0.0.0.0"
     PORT: int = 8000
