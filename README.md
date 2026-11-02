@@ -12,12 +12,13 @@ JulleyOnline is a production-grade, multi-tenant SaaS Kanban project management 
 
 ## 📌 Assignment Deliverables Directory
 
-Evaluators can directly access all 5 key assignment deliverables below:
+Evaluators can directly access all key assignment deliverables below:
 1. **Source Code & Git Repository:** Fully implemented multi-tenant, high-concurrency Kanban platform.
 2. **Database Architecture & ER Diagram:** [`docs/er-diagram.md`](docs/er-diagram.md) — 8-entity Mermaid ER diagram, foreign keys, constraints, and cascade policies.
 3. **API & Real-Time WebSocket Documentation:** [`docs/api-documentation.md`](docs/api-documentation.md) — Complete REST endpoints, Zod schemas, OCC error payloads, and Socket.IO events.
 4. **Requirement Traceability Matrix (RTM):** [`docs/requirement-traceability-matrix.md`](docs/requirement-traceability-matrix.md) — Comprehensive matrix mapping requirements to source files, tests, and verification evidence.
 5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 140 passing automated tests across normal, boundary, security, and concurrency categories.
+6. **Optional AI Kanban Assistant Specification:** [`docs/ai-assistant.md`](docs/ai-assistant.md) — Multi-tenant read-only intelligence extension, 4 allowlisted tools, FastAPI setup, and test evidence.
 
 ## Table of Contents
 
@@ -33,6 +34,7 @@ Evaluators can directly access all 5 key assignment deliverables below:
 10. [Test Suite & Verification Evidence](#test-suite-and-verification-evidence)
 11. [Key Engineering Trade-offs](#key-engineering-trade-offs)
 12. [API & WebSocket Reference](#api--websocket-reference)
+13. [Optional AI Kanban Assistant](#optional-ai-kanban-assistant)
 
 ---
 
@@ -393,6 +395,30 @@ Comprehensive API specifications are documented in [`docs/api-documentation.md`]
 | `DELETE`| `/api/v1/tasks/:id` | Delete task with OCC version check (requires `?version=`) | Creator/Admin |
 | `POST` | `/api/v1/tasks/:id/move` | Move task position / column (atomic transaction) | Bearer + Tenant |
 | `GET` | `/api/v1/boards/:id/activities`| Audit trail of board changes | Bearer + Tenant |
+| `POST` | `/api/v1/ai/chat` | Query read-only AI Kanban Assistant (natural language) | Bearer + Tenant |
+
+---
+
+## Optional AI Kanban Assistant
+
+JulleyOnline includes an **optional, read-only AI Kanban Assistant** extension (documented in detail in [`docs/ai-assistant.md`](docs/ai-assistant.md)).
+
+### Key Architectural Highlights
+- **Strict Gateway & Zero Direct DB Access:** The Python microservice has no database credentials or direct database access. The Node.js Express backend serves as the sole gateway, enforcing authentication, tenant membership checks, and context sanitization.
+- **Data Minimization:** Sensitive credentials, passwords, and emails are stripped before data reaches the AI service.
+- **4 Allowlisted Read-Only Tools:** `get_tasks`, `get_overdue_tasks`, `get_activity_logs`, and `get_board_summary`.
+- **Tenant-Switching Race Protection:** Changing workspaces in the UI immediately aborts in-flight AI requests via `AbortController`, increments request sequencing counters, and resets chat history.
+- **Gemini 2.5 + Deterministic Mock Fallback:** Supports Gemini with automatic fallback to an in-memory deterministic analyzer for testing without API keys.
+
+### Quick Start for AI Service
+
+```bash
+cd ai-service
+py -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --port 8000 --reload
+```
 
 ---
 
