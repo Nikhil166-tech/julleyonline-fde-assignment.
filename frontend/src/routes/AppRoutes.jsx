@@ -49,14 +49,6 @@ export function AppRoutes() {
         <Route path="tasks" element={<DashboardPage />} />
         <Route path="members" element={<MembersPage />} />
         <Route path="activity" element={<ActivityPage />} />
-        <Route
-          path="analytics"
-          element={
-            <div className="p-8 text-center text-xs text-slate-400">
-              Analytics view (Phase 3 Stage A placeholder)
-            </div>
-          }
-        />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
 

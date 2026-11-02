@@ -5,7 +5,6 @@ import {
   CheckSquare,
   Users,
   History,
-  TrendingUp,
   Settings,
   Home,
   Building2,
@@ -25,7 +24,6 @@ export function Sidebar({ isOpen = true, onClose }) {
     { label: 'Tasks', path: '/tasks', icon: CheckSquare },
     { label: 'Members', path: '/members', icon: Users },
     { label: 'Activity', path: '/activity', icon: History },
-    { label: 'Analytics', path: '/analytics', icon: TrendingUp },
     { label: 'Settings', path: '/settings', icon: Settings },
   ];
 
