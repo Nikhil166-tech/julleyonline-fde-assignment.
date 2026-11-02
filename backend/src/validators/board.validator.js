@@ -48,3 +48,7 @@ export const moveTaskSchema = z.object({
   newPosition: z.number().int().min(0, 'Position must be a non-negative integer'),
   version: z.number().int().min(1, 'Known task version is required for optimistic locking'),
 });
+
+export const deleteTaskSchema = z.object({
+  version: z.coerce.number().int().min(1, 'Known task version is required for optimistic locking'),
+});

@@ -7,19 +7,28 @@ export const registerOrgSchema = z
     password: z.string().min(8, 'Password must be at least 8 characters long'),
     organizationName: z.string().min(2, 'Organization name must be at least 2 characters long').max(100).optional(),
     orgName: z.string().min(2, 'Organization name must be at least 2 characters long').max(100).optional(),
-    organizationSlug: z
-      .string()
-      .min(2, 'Slug must be at least 2 characters long')
-      .max(50)
-      .regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase letters, numbers, and hyphens')
-      .optional(),
-    orgSlug: z
-      .string()
-      .min(2, 'Slug must be at least 2 characters long')
-      .max(50)
-      .regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase letters, numbers, and hyphens')
-      .optional(),
-    tenantName: z.string().min(2).max(100).default('General Workspace'),
+    organizationSlug: z.preprocess(
+      (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+      z.string()
+        .min(2, 'Slug must be at least 2 characters long')
+        .max(50)
+        .regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase letters, numbers, and hyphens')
+        .optional()
+    ),
+    orgSlug: z.preprocess(
+      (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+      z.string()
+        .min(2, 'Slug must be at least 2 characters long')
+        .max(50)
+        .regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase letters, numbers, and hyphens')
+        .optional()
+    ),
+    tenantName: z
+      .preprocess(
+        (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+        z.string().min(2).max(100).optional()
+      )
+      .default('General Workspace'),
   })
   .transform((data) => ({
     ...data,

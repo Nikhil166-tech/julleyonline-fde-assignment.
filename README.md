@@ -1,7 +1,7 @@
 # JulleyOnline — Enterprise Multi-Tenant SaaS Kanban Platform
 
-[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-91%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
-[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-16%20Passed-blue.svg)](#test-suite-and-verification-evidence)
+[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-105%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
+[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-20%20Passed-blue.svg)](#test-suite-and-verification-evidence)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Prisma-indigo.svg)](#architecture-overview)
 [![Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO%20%2B%20Presence-amber.svg)](#real-time-collaboration--presence)
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite%20%2B%20Tailwind-cyan.svg)](#frontend-architecture)
@@ -9,6 +9,15 @@
 JulleyOnline is a production-grade, multi-tenant SaaS Kanban project management application built for high-concurrency engineering and operations teams. Designed with strict multi-tenancy isolation, version-based Optimistic Concurrency Control (OCC), integer-based transactional task ordering, real-time Socket.IO collaboration, and a responsive design system replicating enterprise cloud tools.
 
 ---
+
+## 📌 Assignment Deliverables Directory
+
+Evaluators can directly access all 5 key assignment deliverables below:
+1. **Source Code & Git Repository:** Fully implemented multi-tenant, high-concurrency Kanban platform.
+2. **Database Architecture & ER Diagram:** [`docs/er-diagram.md`](docs/er-diagram.md) — 8-entity Mermaid ER diagram, foreign keys, constraints, and cascade policies.
+3. **API & Real-Time WebSocket Documentation:** [`docs/api-documentation.md`](docs/api-documentation.md) — Complete REST endpoints, Zod schemas, OCC error payloads, and Socket.IO events.
+4. **Requirement Traceability Matrix (RTM):** [`docs/requirement-traceability-matrix.md`](docs/requirement-traceability-matrix.md) — Comprehensive matrix mapping requirements to source files, tests, and verification evidence.
+5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 125 passing automated tests across normal, boundary, security, and concurrency categories.
 
 ## Table of Contents
 
@@ -114,6 +123,15 @@ JulleyOnline implements granular, context-aware RBAC evaluated at request time a
 | **Access Activity History** | Yes | Yes | Yes | No |
 | **Real-time Collaboration & Presence**| Yes | Yes | Yes | No |
 
+
+### Organization & Workspace Deletion Permissions & Forced Deletion Policy
+
+JulleyOnline enforces strict tenant hierarchy integrity and prevents accidental data loss through its **Safe Deletion Policy**:
+- **Role Requirement:** Only an **Org Admin** has permission to delete an Organization or Tenant Workspace. Tenant Admins and Members are denied with `HTTP 403 Forbidden`.
+- **Dependency Guard & Warning:** If an Organization has active workspaces or boards, or if a Tenant Workspace has boards or tasks, a standard `DELETE` request is rejected with `HTTP 400 Bad Request`. The API response contains a detailed warning and an inventory of dependent entities.
+- **Forced Deletion (`?force=true`):** To permanently destroy an Organization or Tenant and all subordinate boards, columns, tasks, activities, and memberships, the Org Admin must supply the explicit query flag `?force=true`.
+- **Tenant Membership Permissions & Cross-Organization Boundaries:** Users belong to an Organization and hold contextual memberships within specific Tenant Workspaces. Users can possess different roles across workspaces (e.g. Bob is Tenant Admin in Engineering, but Member in Marketing). Cross-organization collaboration is strictly prohibited: users cannot access data, switch context, or receive WebSocket broadcasts outside their assigned organization (`HTTP 403 Forbidden`).
+
 ---
 
 ## Optimistic Concurrency Control (OCC) & Conflict Resolution
@@ -123,7 +141,7 @@ In high-concurrency collaborative environments, the "last write wins" pattern ca
 ### The Concurrency Protocol
 
 1. **Monotonic Versioning:** Every task row in PostgreSQL possesses a monotonically increasing integer `version` field (starts at `1`).
-2. **Atomic Verification:** Mutations (`PATCH /tasks/:id`, `POST /tasks/:id/move`, `DELETE /tasks/:id`) require the client to supply the current task `version`.
+2. **Atomic Verification:** Mutations (`PUT /api/v1/tasks/:id`, `POST /api/v1/tasks/:id/move`, `DELETE /api/v1/tasks/:id?version=<n>`) require the client to supply the current task `version`.
 3. **HTTP 409 Conflict Response:** If another user updated the task in the interim, the database query returns 0 affected rows. The server immediately returns an **HTTP 409 Conflict**:
    ```json
    {
@@ -275,9 +293,9 @@ Password for all pre-seeded accounts: **`password123`**
 
 ## Test Suite and Verification Evidence
 
-JulleyOnline includes **118 fully automated positive, negative, security, and concurrency tests**:
+JulleyOnline includes **125 fully automated positive, negative, security, and concurrency tests**:
 
-### Running Backend Tests (101 Tests)
+### Running Backend Tests (105 Tests)
 
 ```bash
 cd backend
@@ -286,12 +304,12 @@ pnpm test
 *Executes against isolated test database `julleyonline_kanban_test` on dedicated port 5001.*
 
 - **Phase 1A: Backend Foundation (8 tests):** Config validation, health check, custom domain error handlers.
-- **Phase 1B: Authentication & RBAC (26 tests):** Registration atomicity, bcrypt hashing, JWT tampering, dynamic membership revocation.
+- **Phase 1B: Authentication & RBAC (27 tests):** Registration atomicity, auto slug generation, empty slug tolerance, bcrypt hashing, JWT tampering, dynamic membership revocation.
 - **Phase 2A: Organization & Tenant Management (27 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit.
-- **Phase 2B: Boards, Columns & OCC (29 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, HTTP 409 conflict contract, concurrent creation serialization.
+- **Phase 2B: Boards, Columns & OCC (32 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, HTTP 409 conflict contract, concurrent creation serialization.
 - **Phase 4: Socket.IO & Collaboration (11 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts, immediate WebSocket revocation, tenant room switching.
 
-### Running Frontend Playwright Tests (17 Tests)
+### Running Frontend Playwright Tests (20 Tests)
 
 ```bash
 cd frontend
@@ -299,7 +317,7 @@ npx playwright test tests/board-selector.spec.js tests/e2e.spec.js tests/phase4-
 ```
 
 - **Board Selector & Search (`board-selector.spec.js` - 6 tests):** Real-time search by name/short ID, multiple boards with identical names, tenant isolation, RBAC controls.
-- **End-to-End Real Persistence (`e2e.spec.js` - 4 tests):** Login session hydration, Board/Task CRUD persistence across reloads, non-empty column deletion policy, Member RBAC boundary.
+- **End-to-End Real Persistence (`e2e.spec.js` - 7 tests):** Login session hydration, Board/Task CRUD persistence across reloads, non-empty column deletion policy, Member RBAC boundary, Admin deletion controls, React browser form registration bootstrap, and versioned task deletion OCC.
 - **Real-Time Collaboration & Concurrency (`phase4-collab.spec.js` - 7 tests):** Multi-user room presence pill, real-time task creation/movement broadcast, HTTP 409 conflict modal reconciliation, Undo/Redo OCC validation, socket reconnection recovery, multi-collaborator undo rejection.
 
 ---
@@ -340,7 +358,8 @@ Comprehensive API specifications are documented in [`docs/api-documentation.md`]
 | `POST` | `/api/v1/boards` | Create a new board with default columns | Admin only |
 | `GET` | `/api/v1/boards/:id` | Authoritative snapshot of board, columns, tasks | Bearer + Tenant |
 | `POST` | `/api/v1/columns/:id/tasks` | Create task in column (serialized under column lock) | Bearer + Tenant |
-| `PATCH`| `/api/v1/tasks/:id` | Update task fields (requires `version` for OCC) | Bearer + Tenant |
+| `PUT`  | `/api/v1/tasks/:id` | Update task fields (requires `version` for OCC) | Bearer + Tenant |
+| `DELETE`| `/api/v1/tasks/:id` | Delete task with OCC version check (requires `?version=`) | Creator/Admin |
 | `POST` | `/api/v1/tasks/:id/move` | Move task position / column (atomic transaction) | Bearer + Tenant |
 | `DELETE`|`/api/v1/columns/:id` | Delete column (rejected if column has tasks) | Admin only |
 | `GET` | `/api/v1/boards/:id/activities`| Audit trail of board changes | Bearer + Tenant |

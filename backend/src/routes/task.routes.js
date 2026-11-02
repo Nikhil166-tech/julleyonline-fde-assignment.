@@ -8,6 +8,7 @@ import { broadcastToBoard } from '../socket/index.js';
 import {
   updateTaskSchema,
   moveTaskSchema,
+  deleteTaskSchema,
 } from '../validators/board.validator.js';
 
 const router = Router();
@@ -83,29 +84,26 @@ router.post('/:taskId/move', validateUuidParam('taskId'), async (req, res, next)
   }
 });
 
-// DELETE /api/v1/tasks/:taskId - Delete task (Org Admin, Tenant Admin, or Task Creator)
+// DELETE /api/v1/tasks/:taskId - Delete task with OCC version
 router.delete('/:taskId', validateUuidParam('taskId'), async (req, res, next) => {
   try {
-    const existingTask = await prisma.task.findUnique({
-      where: { id: req.params.taskId },
-      select: { boardId: true, columnId: true },
-    });
+    const rawVersion = req.body?.version !== undefined ? req.body.version : req.query?.version;
+    const { version } = deleteTaskSchema.parse({ version: rawVersion });
 
     const result = await TaskService.deleteTask(
       req.tenantId,
       req.params.taskId,
       req.user.id,
-      req.membership.role
+      req.membership.role,
+      version
     );
 
-    // Broadcast real-time deletion only after successful commit
-    if (existingTask) {
-      broadcastToBoard(req.tenantId, existingTask.boardId, 'task:deleted', {
-        taskId: req.params.taskId,
-        columnId: existingTask.columnId,
-        boardId: existingTask.boardId,
-      });
-    }
+    // Broadcast real-time deletion only after successful database commit
+    broadcastToBoard(req.tenantId, result.boardId, 'task:deleted', {
+      taskId: req.params.taskId,
+      columnId: result.columnId,
+      boardId: result.boardId,
+    });
 
     res.status(200).json(result);
   } catch (error) {

@@ -73,6 +73,18 @@
 ### `PATCH /api/v1/organizations/:orgId`
 - **Description:** Update organization name/slug (Org Admin only).
 
+### `POST /api/v1/organizations`
+- **Description:** Create a new organization with a default tenant workspace and bootstrap the creator as Org Admin.
+- **Headers:** `Authorization: Bearer <token>`
+- **Body:** `{ "name": "Acme Ventures", "slug": "acme-ventures" }`
+- **Response `201 Created`:** Returns created organization, default workspace, and updated context.
+
+### `DELETE /api/v1/organizations/:orgId`
+- **Description:** Delete organization and all subordinate workspaces and boards (Org Admin only).
+- **Headers:** `Authorization: Bearer <token>`
+- **Query Parameter:** `?force=true` (Required if active workspaces or boards exist).
+- **Safe Deletion Policy:** Attempting deletion without `?force=true` when child entities exist returns `HTTP 400 Bad Request` with warning and dependent counts.
+
 ### `POST /api/v1/organizations/:orgId/tenants`
 - **Description:** Create a new tenant workspace in the organization (Org Admin only).
 - **Body:** `{ "name": "Marketing", "slug": "marketing" }`
@@ -85,6 +97,9 @@
 
 ### `DELETE /api/v1/tenants/:tenantId`
 - **Description:** Delete tenant workspace and cascade delete all boards, columns, and tasks (Org Admin only).
+- **Headers:** `Authorization: Bearer <token>`
+- **Query Parameter:** `?force=true` (Required if boards or tasks exist in workspace).
+- **Safe Deletion Policy:** Attempting deletion without `?force=true` when boards exist returns `HTTP 400 Bad Request` with warning and dependent counts.
 
 ### `GET /api/v1/tenants/:tenantId/members`
 - **Description:** List members of the tenant workspace with roles.
@@ -246,9 +261,27 @@
   - Returns `409 Conflict` if the task was moved or updated concurrently (`version` mismatch).
 
 ### `DELETE /api/v1/tasks/:taskId`
+- **Description:** Deletes a task using atomic OCC version verification and closes column position gaps.
 - **Headers:** `Authorization`, `X-Tenant-ID`
-- **Roles:** `ORG_ADMIN`, `TENANT_ADMIN`, or the user who created the task (`createdByUserId === req.user.id`).
-- **Response `200 OK`:** Deletes task and closes contiguous gap in the column.
+- **Query / Body:** Requires `version` (e.g. `DELETE /api/v1/tasks/:taskId?version=2` or JSON body `{ "version": 2 }`).
+- **Roles:** `ORG_ADMIN`, `TENANT_ADMIN`, or the task creator (`createdByUserId === req.user.id`). Other members receive `HTTP 403 Forbidden`.
+- **Concurrency & Atomicity:**
+  - Locks the column row `FOR UPDATE` in PostgreSQL to serialize concurrent operations.
+  - Verifies that the task's current version matches the supplied `version`.
+  - Returns `409 Conflict` if the task was updated concurrently (`details.currentTask` provided).
+  - Returns `400 Validation Error` if `version` is missing or invalid.
+  - Closes contiguous position gaps (`SET position = position - 1 WHERE column_id = ... AND position > deletedPosition`).
+  - Emits real-time `task:deleted` Socket.IO broadcast strictly after the database commit succeeds.
+- **Response `200 OK`:**
+  ```json
+  {
+    "success": true,
+    "message": "Task deleted successfully",
+    "taskId": "<uuid>",
+    "boardId": "<uuid>",
+    "columnId": "<uuid>"
+  }
+  ```
 
 ---
 

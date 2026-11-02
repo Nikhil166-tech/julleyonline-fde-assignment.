@@ -184,5 +184,63 @@ test.describe('JulleyOnline End-to-End Real Persistence & RBAC Test Suite', () =
     await page.getByRole('button', { name: 'Workspace (Tenant)' }).click();
     await expect(page.getByRole('button', { name: 'Delete Workspace' })).toHaveCount(0);
   });
+  test('E2E-06: New user registration via browser form bootstraps organization, workspace, and Org Admin navigation', async ({ page }) => {
+    const ts = Date.now();
+    const regEmail = `founder_${ts}@enterprisestartup.io`;
+    const orgName = `Acme Future ${ts}`;
+    const tenantName = `HQ Workspace`;
+
+    await page.goto('/register');
+
+    // Fill in clean registration form
+    await page.fill('input[name="name"]', 'Elena Rostova');
+    await page.fill('input[name="email"]', regEmail);
+    await page.fill('input[name="password"]', 'securePassword123');
+    await page.fill('input[name="organizationName"]', orgName);
+    await page.fill('input[name="tenantName"]', tenantName);
+
+    await page.click('button[type="submit"]:has-text("Create Account")');
+
+    // Should redirect to dashboard upon successful bootstrap
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
+
+    // Verify authenticated user details in header
+    await expect(page.locator('header')).toContainText('Elena Rostova');
+    await expect(page.locator('header')).toContainText('Org Admin');
+    await expect(page.locator('header')).toContainText(orgName);
+  });
+
+  test('E2E-07: Task deletion with OCC version verification succeeds and updates board state', async ({ page }) => {
+    // 1. Log in as Bob
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/(\?boardId=.*)?$/);
+
+    // 2. Create a task to delete
+    const delTaskTitle = `Task To Delete ${Date.now()}`;
+    await page.click('button:has-text("Add Task")');
+    const taskModal = page.locator('div[role="dialog"]');
+    await expect(taskModal).toBeVisible();
+    await taskModal.locator('input[placeholder="e.g. Implement Optimistic Locking"]').fill(delTaskTitle);
+    await taskModal.locator('button[type="submit"]:has-text("Create Task")').click();
+
+    // 3. Locate task card and open drawer
+    const taskCard = page.locator(`[data-testid="task-card"]:has-text("${delTaskTitle}")`);
+    await expect(taskCard).toBeVisible();
+    await taskCard.click();
+
+    const drawer = page.locator('[data-testid="task-details-drawer"]');
+    await expect(drawer).toBeVisible();
+
+    // 4. Accept window confirmation dialog and click delete
+    page.once('dialog', (dialog) => dialog.accept());
+    await drawer.locator('button[title="Delete task"]').click();
+
+    // 5. Drawer should close and card should be removed from board
+    await expect(drawer).not.toBeVisible();
+    await expect(page.locator(`text=${delTaskTitle}`)).toHaveCount(0);
+  });
 
 });

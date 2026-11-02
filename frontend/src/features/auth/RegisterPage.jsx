@@ -9,10 +9,8 @@ export function RegisterPage() {
     name: '',
     email: '',
     password: '',
-    orgName: '',
-    orgSlug: '',
+    organizationName: '',
     tenantName: '',
-    tenantSlug: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,14 +28,11 @@ export function RegisterPage() {
 
     try {
       await register({
-        name: formData.name,
-        email: formData.email,
+        name: formData.name.trim(),
+        email: formData.email.trim(),
         password: formData.password,
-        organizationName: formData.orgName,
-        organizationSlug: formData.orgSlug,
-        orgName: formData.orgName,
-        orgSlug: formData.orgSlug,
-        tenantName: formData.tenantName,
+        organizationName: formData.organizationName.trim(),
+        tenantName: formData.tenantName.trim() || undefined,
       });
       navigate('/');
     } catch (err) {
@@ -124,8 +119,8 @@ export function RegisterPage() {
                 <label className="block font-semibold text-slate-700 mb-1">Company Name</label>
                 <input
                   type="text"
-                  name="orgName"
-                  value={formData.orgName}
+                  name="organizationName"
+                  value={formData.organizationName}
                   onChange={handleChange}
                   required
                   placeholder="e.g. Acme Corp"
@@ -139,7 +134,6 @@ export function RegisterPage() {
                   name="tenantName"
                   value={formData.tenantName}
                   onChange={handleChange}
-                  required
                   placeholder="e.g. Engineering"
                   className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                 />

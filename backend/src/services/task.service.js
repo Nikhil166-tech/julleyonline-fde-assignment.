@@ -426,49 +426,87 @@ export class TaskService {
   }
 
   /**
-   * Delete task with contiguous position gap closing and RBAC enforcement
+   * Delete task with OCC version verification, contiguous position gap closing,
+   * column row locking, and RBAC enforcement.
    */
-  static async deleteTask(tenantId, taskId, userId, userRole) {
-    const task = await prisma.task.findFirst({
-      where: { id: taskId, tenantId },
-    });
-
-    if (!task) {
-      const existsElsewhere = await prisma.task.findUnique({ where: { id: taskId } });
-      if (existsElsewhere) {
-        throw new ForbiddenError('Access forbidden: Task belongs to another tenant workspace');
-      }
-      throw new NotFoundError('Task not found in this tenant workspace');
-    }
-
-    // Role check: Org Admin, Tenant Admin, or creator
-    if (userRole !== 'ORG_ADMIN' && userRole !== 'TENANT_ADMIN' && task.createdByUserId !== userId) {
-      throw new ForbiddenError('Only tenant administrators or the task creator can delete this task');
-    }
-
+  static async deleteTask(tenantId, taskId, userId, userRole, version) {
     return prisma.$transaction(async (tx) => {
+      // 1. Initial lookup to verify tenant boundary
+      const task = await tx.task.findFirst({
+        where: { id: taskId, tenantId },
+        include: {
+          column: { select: { id: true, name: true } },
+        },
+      });
+
+      if (!task) {
+        const existsElsewhere = await tx.task.findUnique({ where: { id: taskId } });
+        if (existsElsewhere) {
+          throw new ForbiddenError('Access forbidden: Task belongs to another tenant workspace');
+        }
+        throw new NotFoundError('Task not found in this tenant workspace');
+      }
+
+      // 2. RBAC check: Org Admin, Tenant Admin, or Task Creator
+      if (userRole !== 'ORG_ADMIN' && userRole !== 'TENANT_ADMIN' && task.createdByUserId !== userId) {
+        throw new ForbiddenError('Only tenant administrators or the task creator can delete this task');
+      }
+
+      // 3. Lock target column to serialize concurrent moves, updates, or deletions
+      await tx.$executeRaw`SELECT 1 FROM columns WHERE id = ${task.columnId}::uuid FOR UPDATE`;
+
+      // 4. Re-read task after acquiring column lock to inspect true current state
+      const lockedTask = await tx.task.findUnique({
+        where: { id: taskId },
+      });
+
+      if (!lockedTask) {
+        throw new NotFoundError('Task not found or was already deleted by another collaborator');
+      }
+
+      // 5. OCC version verification
+      if (lockedTask.version !== version) {
+        throw new ConflictError('Task has been modified by another collaborator. Please refresh.', {
+          currentTask: lockedTask,
+        });
+      }
+
+      // 6. Delete task atomically
       await tx.task.delete({
         where: { id: taskId },
       });
 
-      // Close contiguous gap in the column
+      // 7. Close contiguous gap in the column
       await tx.$executeRaw`
         UPDATE tasks
         SET position = position - 1, updated_at = NOW()
-        WHERE column_id = ${task.columnId}::uuid
-          AND position > ${task.position}
+        WHERE column_id = ${lockedTask.columnId}::uuid
+          AND position > ${lockedTask.position}
       `;
 
+      // 8. Log audit activity
       await ActivityService.log(tx, {
         tenantId,
-        boardId: task.boardId,
+        boardId: lockedTask.boardId,
         taskId: null,
         userId,
         action: 'TASK_DELETED',
-        details: { taskId: task.id, title: task.title, columnId: task.columnId, position: task.position },
+        details: {
+          taskId: lockedTask.id,
+          title: lockedTask.title,
+          columnId: lockedTask.columnId,
+          position: lockedTask.position,
+          version: lockedTask.version,
+        },
       });
 
-      return { success: true, message: 'Task deleted successfully' };
+      return {
+        success: true,
+        message: 'Task deleted successfully',
+        taskId: lockedTask.id,
+        boardId: lockedTask.boardId,
+        columnId: lockedTask.columnId,
+      };
     });
   }
 }

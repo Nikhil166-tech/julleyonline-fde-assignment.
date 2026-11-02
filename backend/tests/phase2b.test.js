@@ -499,7 +499,7 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
       const bobsTaskId = bobsTaskData.data.id;
 
       // 2. Charlie (Member) attempts to delete Bob's task -> 403 Forbidden
-      const charlieDelRes = await fetch(`${baseUrl}/api/v1/tasks/${bobsTaskId}`, {
+      const charlieDelRes = await fetch(`${baseUrl}/api/v1/tasks/${bobsTaskId}?version=1`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${charlieToken}`,
@@ -508,8 +508,8 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
       });
       assert.equal(charlieDelRes.status, 403);
 
-      // 3. Charlie deletes his own task (createdTaskId) -> 200 OK
-      const ownDelRes = await fetch(`${baseUrl}/api/v1/tasks/${createdTaskId}`, {
+      // 3. Charlie deletes his own task (createdTaskId, now at version 2) -> 200 OK
+      const ownDelRes = await fetch(`${baseUrl}/api/v1/tasks/${createdTaskId}?version=2`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${charlieToken}`,
@@ -519,7 +519,7 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
       assert.equal(ownDelRes.status, 200);
 
       // 4. Bob (Tenant Admin) deletes his task -> 200 OK
-      const adminDelRes = await fetch(`${baseUrl}/api/v1/tasks/${bobsTaskId}`, {
+      const adminDelRes = await fetch(`${baseUrl}/api/v1/tasks/${bobsTaskId}?version=1`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${bobToken}`,
@@ -807,6 +807,135 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
       const statuses = [res1.status, res2.status].sort();
       // Exactly one must succeed (200) and one must receive conflict (409)
       assert.deepEqual(statuses, [200, 409]);
+    });
+
+    it('TC-OCC-06: Task deletion with stale version returns HTTP 409 Conflict, latest task state, and preserves task', async () => {
+      // 1. Create task at v1
+      const taskRes = await fetch(`${baseUrl}/api/v1/boards/${testBoardId}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({
+          columnId: backlogColId,
+          title: 'Delete OCC Task',
+        }),
+      });
+      assert.equal(taskRes.status, 201);
+      const { data: createdTask } = await taskRes.json();
+      assert.equal(createdTask.version, 1);
+
+      // 2. Bob edits task producing version 2
+      const updateRes = await fetch(`${baseUrl}/api/v1/tasks/${createdTask.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({
+          title: 'Bob Updated Delete OCC Task',
+          version: 1,
+        }),
+      });
+      assert.equal(updateRes.status, 200);
+      const { data: updatedTask } = await updateRes.json();
+      assert.equal(updatedTask.version, 2);
+
+      // 3. Alice attempts deletion using stale version 1
+      const staleDeleteRes = await fetch(`${baseUrl}/api/v1/tasks/${createdTask.id}?version=1`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${aliceToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+      });
+      assert.equal(staleDeleteRes.status, 409);
+      const conflictData = await staleDeleteRes.json();
+      assert.equal(conflictData.success, false);
+      assert.equal(conflictData.error.code, 'CONFLICT');
+      assert.match(conflictData.error.message, /modified by another collaborator/i);
+      assert.equal(conflictData.error.details.currentTask.version, 2);
+
+      // 4. Verify task still exists in PostgreSQL with Bob's changes intact
+      const dbTask = await prisma.task.findUnique({ where: { id: createdTask.id } });
+      assert.ok(dbTask, 'Task must NOT be deleted after a 409 conflict');
+      assert.equal(dbTask.title, 'Bob Updated Delete OCC Task');
+      assert.equal(dbTask.version, 2);
+    });
+
+    it('TC-OCC-07: Task deletion with missing version returns HTTP 400 Validation Error', async () => {
+      const taskRes = await fetch(`${baseUrl}/api/v1/boards/${testBoardId}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({
+          columnId: backlogColId,
+          title: 'Missing Version Delete Task',
+        }),
+      });
+      const { data: task } = await taskRes.json();
+
+      const noVerRes = await fetch(`${baseUrl}/api/v1/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+      });
+      assert.equal(noVerRes.status, 400);
+      const errData = await noVerRes.json();
+      assert.equal(errData.success, false);
+      assert.equal(errData.error.code, 'VALIDATION_ERROR');
+    });
+
+    it('TC-OCC-08: Task deletion using authoritative version succeeds and maintains contiguous column ordering', async () => {
+      // 1. Create two consecutive tasks
+      const res1 = await fetch(`${baseUrl}/api/v1/boards/${testBoardId}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({ columnId: backlogColId, title: 'Contiguous A' }),
+      });
+      const { data: tA } = await res1.json();
+
+      const res2 = await fetch(`${baseUrl}/api/v1/boards/${testBoardId}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({ columnId: backlogColId, title: 'Contiguous B' }),
+      });
+      const { data: tB } = await res2.json();
+
+      // Delete task A using authoritative version
+      const delRes = await fetch(`${baseUrl}/api/v1/tasks/${tA.id}?version=${tA.version}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+      });
+      assert.equal(delRes.status, 200);
+
+      // Verify task B shifted position to fill gap
+      const remainingTasks = await prisma.task.findMany({
+        where: { columnId: backlogColId },
+        orderBy: { position: 'asc' },
+      });
+      const posB = remainingTasks.find((t) => t.id === tB.id);
+      assert.ok(posB);
+      assert.equal(posB.position, tA.position);
     });
   });
 

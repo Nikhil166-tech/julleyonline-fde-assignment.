@@ -341,7 +341,7 @@ describe('Phase 4: Real-Time Collaboration, Socket.IO & Presence Test Suite', ()
         });
       });
 
-      const res = await fetch(`${baseUrl}/api/v1/tasks/${createdTaskId}`, {
+      const res = await fetch(`${baseUrl}/api/v1/tasks/${createdTaskId}?version=3`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${bobToken}`,

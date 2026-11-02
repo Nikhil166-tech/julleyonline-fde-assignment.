@@ -83,5 +83,15 @@ export const api = {
   post: (endpoint, body, options) => apiRequest(endpoint, { ...options, method: 'POST', body }),
   put: (endpoint, body, options) => apiRequest(endpoint, { ...options, method: 'PUT', body }),
   patch: (endpoint, body, options) => apiRequest(endpoint, { ...options, method: 'PATCH', body }),
-  delete: (endpoint, options) => apiRequest(endpoint, { ...options, method: 'DELETE' }),
+  delete: (endpoint, bodyOrOptions, maybeOptions) => {
+    let options = {};
+    if (maybeOptions) {
+      options = { ...maybeOptions, body: bodyOrOptions };
+    } else if (bodyOrOptions && (bodyOrOptions.body || bodyOrOptions.headers)) {
+      options = bodyOrOptions;
+    } else if (bodyOrOptions) {
+      options = { body: bodyOrOptions };
+    }
+    return apiRequest(endpoint, { ...options, method: 'DELETE' });
+  },
 };

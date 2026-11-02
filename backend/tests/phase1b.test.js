@@ -231,6 +231,39 @@ describe('Phase 1B: Authentication, Tenant Scoping & RBAC Comprehensive Test Sui
       // Exactly one should succeed (201) and the other should be rejected (409)
       assert.deepEqual(statuses, [201, 409]);
     });
+
+    it('TC-AUT-07: registers successfully without organizationSlug or with empty string slugs (auto-generation)', async () => {
+      const ts = Date.now();
+      const autoSlugEmail = `autoslug_${ts}@autogen.io`;
+      const res = await fetch(`${baseUrl}/api/v1/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Auto Slug Founder',
+          email: autoSlugEmail,
+          password: 'securePassword123',
+          organizationName: `Auto Generated Venture ${ts}`,
+          organizationSlug: '', // Empty string slug like previous form submitted
+          tenantName: 'Primary Workspace',
+        }),
+      });
+
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.data.user.email, autoSlugEmail);
+      assert.ok(data.data.organization.slug.startsWith('auto-generated-venture'));
+      assert.ok(data.data.token);
+
+      // Verify in DB that workspace was created with auto-slug
+      const orgInDb = await prisma.organization.findUnique({
+        where: { id: data.data.organization.id },
+        include: { tenants: true, memberships: true },
+      });
+      assert.equal(orgInDb.tenants.length, 1);
+      assert.equal(orgInDb.tenants[0].name, 'Primary Workspace');
+      assert.equal(orgInDb.memberships.length, 2); // 1 Org Admin + 1 Tenant Admin
+    });
   });
 
   // -------------------------------------------------------------

@@ -157,6 +157,10 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | :--- | :--- | :--- | :--- |
 | `TC-MOV-CONC-01` | Column Lock | 5 simultaneous task creations serialized via column lock yield dense unique positions `[0, 1, 2, 3, 4]` | **PASS** |
 | `TC-MOV-CONC-02` | Column Lock | Concurrent task moves re-reading position under column lock maintain dense contiguous positions | **PASS** |
+| `TC-OCC-06` | OCC Deletion | Task deletion with stale version returns HTTP 409 Conflict, latest task state, and preserves task | **PASS** |
+| `TC-OCC-07` | OCC Deletion | Task deletion with missing version returns HTTP 400 Validation Error | **PASS** |
+| `TC-OCC-08` | OCC Deletion | Task deletion using authoritative version succeeds and maintains contiguous column ordering | **PASS** |
+
 
 ### Advanced Org/Tenant CRUD & Safe Deletion Tests (`tests/phase2a.test.js`)
 | Test ID | Category | Scenario / Assertion | Status |
@@ -178,6 +182,17 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `SEL-05` | Tenant Isolation | Tenant switching strictly scopes board selector and prevents cross-tenant UI bleed | **PASS** |
 | `SEL-06` | RBAC Visibility | Create Board action in BoardSelector visible for Admins and hidden for Members | **PASS** |
 
+### Real End-to-End Persistence & OCC Playwright Tests (`tests/e2e.spec.js`)
+| Test ID | Category | Scenario / Assertion | Status |
+| :--- | :--- | :--- | :--- |
+| `E2E-01` | Auth Context | User Login with seeded credentials hydrates session and workspace context | **PASS** |
+| `E2E-02` | Board/Task CRUD | Board & Task CRUD with real PostgreSQL persistence and refresh verification | **PASS** |
+| `E2E-03` | Safety Policy | Column Deletion Non-Empty Safety Policy Enforcement | **PASS** |
+| `E2E-04` | RBAC Boundary | Role-Based Access Control: Charlie (Member) cannot manage boards or columns | **PASS** |
+| `E2E-05` | Admin Boundary | Only Org Admin sees organization and workspace deletion controls | **PASS** |
+| `E2E-06` | Registration | New user registration via browser form bootstraps organization, workspace, and Org Admin navigation | **PASS** |
+| `E2E-07` | OCC Deletion | Task deletion with OCC version verification succeeds and updates board state | **PASS** |
+
 ### Two-Browser Multi-User Playwright End-to-End Collaboration Tests (`tests/phase4-collab.spec.js`)
 | Test ID | Category | Multi-User Scenario / Verification | Status |
 | :--- | :--- | :--- | :--- |
@@ -189,4 +204,4 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `COL-06` | Network Recovery | Disconnecting socket updates status to disconnected; on reconnect, auto-rejoins room and refetches snapshot | **PASS** |
 | `COL-07` | Undo Concurrency | Charlie's concurrent update blocks Bob's stale Undo with HTTP 409 and protects Charlie's changes | **PASS** |
 
-**Total Automated Suite**: 101 Backend Unit & Integration Tests (100% pass) + 17 Playwright End-to-End Tests (100% pass) = 118 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.
+**Total Automated Suite**: 105 Backend Unit & Integration Tests (100% pass) + 20 Playwright End-to-End Tests (100% pass) = 125 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.

@@ -139,11 +139,21 @@ export function TaskDetailsDrawer({
     try {
       setDeleting(true);
       setError('');
-      await api.delete(`/tasks/${task.id}`);
+      await api.delete(`/tasks/${task.id}`, { version: task.version });
       onTaskDeleted(task.id);
       onClose();
     } catch (err) {
-      setError(err.message || 'Failed to delete task');
+      if (err.statusCode === 409 || err.code === 'CONFLICT') {
+        const conflictTask = err.details?.currentTask;
+        setError(
+          `Conflict: Task was modified by another collaborator (v${conflictTask?.version || 'newer'}). Deletion cancelled. Refreshing to latest state.`
+        );
+        if (conflictTask && onTaskUpdated) {
+          onTaskUpdated(conflictTask);
+        }
+      } else {
+        setError(err.message || 'Failed to delete task');
+      }
     } finally {
       setDeleting(false);
     }
