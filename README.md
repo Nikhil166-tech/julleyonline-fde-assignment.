@@ -1,7 +1,7 @@
 # JulleyOnline — Enterprise Multi-Tenant SaaS Kanban Platform
 
 [![Backend Tests](https://img.shields.io/badge/Backend%20Tests-117%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
-[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-22%20Passed-blue.svg)](#test-suite-and-verification-evidence)
+[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-23%20Passed-blue.svg)](#test-suite-and-verification-evidence)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Prisma-indigo.svg)](#architecture-overview)
 [![Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO%20%2B%20Presence-amber.svg)](#real-time-collaboration--presence)
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite%20%2B%20Tailwind-cyan.svg)](#frontend-architecture)
@@ -206,7 +206,7 @@ Attached directly to the Node.js HTTP server via **Socket.IO** (`backend/src/soc
 4. **Presence Tracking with Multi-Tab Handling:**
    - Online presence maps `userId -> Set<socketId>` per board room.
    - Opening multiple browser tabs for the same user increments socket connections but counts as 1 online collaborator.
-   - Closing one tab leaves the user online; closing the final tab emits `presence:leave` to collaborators.
+   - Closing one tab leaves the user online; closing the final tab broadcasts updated presence to collaborators through `presence:sync` and `tenant:presence:sync`.
 5. **Network Reconnection & Recovery:**
    - If the network drops, the frontend automatically re-authenticates and rejoins the board room.
    - Triggers an authoritative snapshot resync (`GET /api/v1/boards/:id`) to catch up on any missed edits.
@@ -327,18 +327,18 @@ pnpm test
 
 - **Phase 1A: Backend Foundation (9 tests):** Config validation, test DB safety guard (`TC-SAF-01` in `testDbGuard.js`), health check, custom domain error handlers.
 - **Phase 1B: Authentication & RBAC (29 tests):** Registration atomicity, auto slug generation, empty slug tolerance, non-alphanumeric rejection, bcrypt hashing, JWT tampering, dynamic membership revocation, Org Admin effectiveRole preservation.
-- **Phase 2A: Organization & Tenant Management (29 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit, serialized concurrent Org Admin protection (2-admin and 3-admin overlapping races).
-- **Phase 2B: Boards, Columns & OCC (39 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization, concurrent column creation serialization, column deletion locking, true column deletion vs task creation concurrency (Scenarios A & B).
+- **Phase 2A: Organization & Tenant Management (28 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit, serialized concurrent Org Admin protection (2-admin and 3-admin overlapping races).
+- **Phase 2B: Boards, Columns & OCC (40 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization, concurrent column creation serialization, column deletion locking, true column deletion vs task creation concurrency (Scenarios A & B).
 - **Phase 4: Socket.IO & Collaboration (11 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts, immediate WebSocket revocation, tenant room switching.
 
-### Running Frontend Playwright Tests (22 Tests)
+### Running Frontend Playwright Tests (23 Tests)
 
 ```bash
 cd frontend
 npx playwright test tests/board-selector.spec.js tests/e2e.spec.js tests/phase4-collab.spec.js
 ```
 
-- **Board Selector & Search (`board-selector.spec.js` - 6 tests):** Real-time search by name/short ID, multiple boards with identical names, tenant isolation, RBAC controls.
+- **Board Selector & Search (`board-selector.spec.js` - 7 tests):** Real-time search by name/short ID, multiple boards with identical names, tenant isolation, RBAC controls, and tenant-switching race condition prevention (`SEL-07`).
 - **End-to-End Real Persistence (`e2e.spec.js` - 7 tests):** Login session hydration, Board/Task CRUD persistence across reloads, non-empty column deletion policy, Member RBAC boundary, Admin deletion controls, React browser form registration bootstrap, and versioned task deletion OCC.
 - **Real-Time Collaboration & Concurrency (`phase4-collab.spec.js` - 9 tests):** Multi-user room presence pill, real-time task creation/movement broadcast, HTTP 409 conflict modal reconciliation, Undo/Redo OCC validation, socket reconnection recovery, multi-collaborator undo rejection, synchronous task version tracking & optimistic mutation snapshot protection (`COL-09`), multi-tab presence deduplication and tenant switching active user scoping (`COL-10`).
 
@@ -370,20 +370,28 @@ Comprehensive API specifications are documented in [`docs/api-documentation.md`]
 | :--- | :--- | :--- | :---: |
 | `POST` | `/api/v1/auth/register` | Register new organization & initial Org Admin | No |
 | `POST` | `/api/v1/auth/login` | Authenticate user; returns JWT & memberships | No |
+| `POST` | `/api/v1/auth/logout` | Logout user (documents stateless client token discard) | Bearer JWT |
 | `POST` | `/api/v1/auth/switch-context`| Switch active tenant workspace | Bearer JWT |
 | `POST` | `/api/v1/organizations` | Create a new organization with default workspace | Bearer JWT |
 | `DELETE`| `/api/v1/organizations/:id` | Delete organization (requires `?force=true` if active) | Org Admin |
+| `GET`  | `/api/v1/organizations/:id/tenants` | List all tenant workspaces in organization | Bearer JWT |
+| `DELETE`| `/api/v1/organizations/:id/members/:membershipId` | Remove Org Admin/member (protects last Org Admin) | Org Admin |
 | `POST` | `/api/v1/organizations/:id/tenants` | Create tenant workspace | Org Admin |
 | `DELETE`| `/api/v1/tenants/:id` | Delete tenant workspace (requires `?force=true` if active) | Org Admin |
 | `GET` | `/api/v1/tenants/:id/activities` | Tenant workspace-wide activity audit trail | Bearer + Tenant |
-| `GET` | `/api/v1/boards` | List boards for active tenant | Bearer + Tenant |
+| `GET` | `/api/v1/boards` | List boards for active tenant (supports `?q=` search) | Bearer + Tenant |
 | `POST` | `/api/v1/boards` | Create a new board with default columns | Admin only |
 | `GET` | `/api/v1/boards/:id` | Authoritative snapshot of board, columns, tasks | Bearer + Tenant |
-| `POST` | `/api/v1/columns/:id/tasks` | Create task in column (serialized under column lock) | Bearer + Tenant |
+| `POST` | `/api/v1/boards/:boardId/columns` | Create column with contiguous position | Admin only |
+| `PUT`  | `/api/v1/columns/:id` | Rename column | Admin only |
+| `POST` | `/api/v1/columns/:id/move` | Reorder column position | Admin only |
+| `DELETE`|`/api/v1/columns/:id` | Delete column (rejected if column has tasks) | Admin only |
+| `GET`  | `/api/v1/tasks` | Search or list tasks in active tenant workspace | Bearer + Tenant |
+| `POST` | `/api/v1/boards/:boardId/tasks` | Create task in column (serialized under column lock) | Bearer + Tenant |
+| `GET`  | `/api/v1/tasks/:id` | View task details | Bearer + Tenant |
 | `PUT`  | `/api/v1/tasks/:id` | Update task fields (requires `version` for OCC) | Bearer + Tenant |
 | `DELETE`| `/api/v1/tasks/:id` | Delete task with OCC version check (requires `?version=`) | Creator/Admin |
 | `POST` | `/api/v1/tasks/:id/move` | Move task position / column (atomic transaction) | Bearer + Tenant |
-| `DELETE`|`/api/v1/columns/:id` | Delete column (rejected if column has tasks) | Admin only |
 | `GET` | `/api/v1/boards/:id/activities`| Audit trail of board changes | Bearer + Tenant |
 
 ---

@@ -82,23 +82,24 @@ The system combines synchronous REST requests for transactional state mutations 
 7. **HTTP Response**: The HTTP endpoint returns the mutated resource with updated version metadata.
 
 ### 3.2 Asynchronous Real-Time Path (Socket.IO) & Reliability Guarantees
-1. **Connection & Authentication**: When the client connects, it provides the JWT in `socket.handshake.auth.token`. The server validates the token; invalid tokens trigger an immediate socket disconnect.
+1. **Connection & Authentication**: When the client connects, it provides the JWT in `socket.handshake.auth.token` or the `Authorization: Bearer` header. The server validates the token; invalid tokens trigger an immediate socket disconnect.
 2. **Server-Side Room Authorization**:
-   - Clients request to join a room by emitting `join:board { boardId, tenantId }`.
-   - The server **does not trust client room claims**. It queries user memberships and verifies the board belongs to the specified `tenantId`.
-   - Only upon verification does the server call `socket.join("tenant:<tenantId>:board:<boardId>")`.
+   - Clients request to join a board room by emitting `join:board { boardId, tenantId }`.
+   - The server **does not trust client room claims**. It queries PostgreSQL memberships and verifies the board exists and belongs to the specified `tenantId`.
+   - Only upon verification does the server call `socket.join("tenant:<tenantId>:board:<boardId>")` and acknowledge with `room:joined`.
+   - Similarly, workspace-wide presence uses `join:tenant { tenantId }`, acknowledged with `tenant:joined`.
 3. **Best-Effort Delivery Notice**:
-   - Socket.IO events are **not guaranteed delivery**. Packet loss, background browser throttling, or network hiccups may cause dropped or reordered events.
-   - Sockets act as ephemeral signals to update UI views quickly. When strict certainty is required, clients rely on PostgreSQL-backed REST responses.
+   - Socket.IO events provide real-time notification signals. Packet loss, background browser throttling, or temporary disconnection may delay or drop events.
+   - Sockets act as responsive signals to update UI views rapidly. When strict certainty is required, clients rely on PostgreSQL-backed REST responses and snapshot reconciliation.
 4. **Duplicate & Out-of-Order Event Handling**:
-   - **Sender Protection**: Socket payloads include `actorId` and `clientRequestId`. The initiating client ignores incoming broadcasts matching its own inflight request, relying instead on the definitive HTTP REST response.
-   - **Receiver Version Check**: Every task event carries the authoritative `version`.
-     - If `event.version <= localTask.version`: The event is stale or duplicate $\to$ **safely discarded**.
-     - If `event.version === localTask.version + 1`: The transition is contiguous $\to$ **applied immediately**.
-     - If `event.version > localTask.version + 1`: An event was dropped/missed $\to$ client automatically triggers a fresh board-state fetch (`GET /api/v1/boards/:boardId`).
+   - **Event-ID Deduplication**: Every broadcast payload includes a unique UUID `eventId`. The client maintains a bounded `processedEventsRef` cache (up to 200 IDs) and immediately drops duplicate events.
+   - **Synchronous Version Comparison**: Local `taskVersionMap` caches the authoritative monotonic version for each task. If an incoming `task:moved` or `task:updated` event has a version lower than the cached version (`event.version < localTask.version`), it is safely discarded as a stale broadcast.
+   - **Authoritative Snapshot Reconciliation**: On structural changes (column move, task move across columns) and socket reconnections, the client triggers `fetchBoardSnapshot(currentBoardId)` (`GET /api/v1/boards/:boardId`) to ensure sibling card positions and metadata are completely synchronized with PostgreSQL.
+   - **Optimistic Updates & HTTP 409 Rollback**: Frontend applies optimistic UI adjustments immediately. If the server rejects the mutation with HTTP 409 Conflict, the client displays a conflict notification modal and reconciles local state with the latest authoritative server snapshot.
 5. **Presence Tracking**:
-   - An in-memory tracking structure associates sockets with users and board rooms.
-   - When a user joins or disconnects, `presence:sync` events broadcast the current list of active viewing users to the board room.
+   - An in-memory tracking structure (`presenceMap`) associates sockets with users, tenant workspaces, and board rooms.
+   - Multiple browser tabs for the same user increment socket connections but count as a single active user in the presence avatar stack.
+   - When a user joins, leaves, disconnects, or has membership revoked, `presence:sync` (board room) and `tenant:presence:sync` (tenant room) broadcast the current active users list. *(The server does not emit a separate `presence:leave` event; presence state is synchronized via `presence:sync` and `tenant:presence:sync`)*.
 
 ---
 
@@ -108,7 +109,7 @@ The application adopts a **Shared Database, Shared Schema** multi-tenancy model 
 
 ### 4.1 Secure Organization Registration & Initial Org Admin Creation
 Bootstrapping a new organization occurs through a dedicated, atomic registration endpoint:
-- **Endpoint**: `POST /api/v1/auth/register-org`
+- **Endpoint**: `POST /api/v1/auth/register`
 - **Atomic Bootstrap Workflow (`prisma.$transaction`)**:
   1. **Password Hashing**: Hash user password using bcrypt with a salt factor of 12.
   2. **User Creation**: Insert user record into `users` table with normalized email.
@@ -146,9 +147,9 @@ To prevent privilege escalation and ensure clear access scopes, memberships are 
 ## 5. Role-Based Access Control (RBAC) Permission Matrix
 
 The application defines three roles:
-1. **Org Admin**: Enterprise administrator with full control over the organization, its tenants, billing, and organizational policies.
+1. **Org Admin**: Enterprise administrator with full control over the organization, its tenants, and organizational policies.
 2. **Tenant Admin**: Workspace administrator with control over a specific tenant, its boards, columns, and member invitations.
-3. **Member**: Collaborator who participates in task management, column movement, assignments, and discussions within an authorized tenant.
+3. **Member**: Collaborator who participates in task management, column movement, and assignments within an authorized tenant.
 
 ### Role Scope & Permissions
 
@@ -301,39 +302,64 @@ In our architecture, JWTs are signed with a cryptographic HMAC-SHA256 secret key
 
 #### Organizations & Tenants
 - `GET /api/v1/organizations` — List organizations accessible by user
-- `POST /api/v1/organizations` — Create a new organization (Org Admin)
+- `POST /api/v1/organizations` — Create a new organization with default workspace (Org Admin)
+- `GET /api/v1/organizations/:orgId` — View organization details
+- `PATCH /api/v1/organizations/:orgId` — Update organization name/slug (Org Admin)
+- `DELETE /api/v1/organizations/:orgId` — Delete organization (requires `?force=true` if active)
 - `GET /api/v1/organizations/:orgId/tenants` — List tenants for an organization
 - `POST /api/v1/organizations/:orgId/tenants` — Create a new tenant (Org Admin)
+- `DELETE /api/v1/organizations/:orgId/members/:membershipId` — Remove an Org Admin/member (protects last Org Admin)
+- `GET /api/v1/tenants/:tenantId` — View tenant workspace details
+- `PATCH /api/v1/tenants/:tenantId` — Update tenant name/slug (Tenant Admin or Org Admin)
+- `DELETE /api/v1/tenants/:tenantId` — Delete tenant workspace (requires `?force=true` if active)
 - `GET /api/v1/tenants/:tenantId/members` — List members of a tenant
-- `POST /api/v1/tenants/:tenantId/members` — Invite/add member to tenant (Admin)
+- `POST /api/v1/tenants/:tenantId/members` — Invite/add member to tenant (Tenant Admin or Org Admin)
+- `PATCH /api/v1/tenants/:tenantId/members/:membershipId` — Update tenant member's role
+- `DELETE /api/v1/tenants/:tenantId/members/:membershipId` — Remove member from tenant workspace
+- `GET /api/v1/tenants/:tenantId/activities` — Get workspace-wide activity audit trail
 
 #### Boards & Columns
-- `GET /api/v1/boards` — List boards for active tenant
-- `POST /api/v1/boards` — Create board in active tenant
-- `GET /api/v1/boards/:boardId` — Get board detail with columns and tasks
+- `GET /api/v1/boards` — List boards for active tenant (supports optional `?q=` search)
+- `POST /api/v1/boards` — Create board in active tenant with default columns (Admin)
+- `GET /api/v1/boards/:boardId` — Get full authoritative snapshot of board with columns and tasks
+- `PUT /api/v1/boards/:boardId` — Update board name and description (Admin)
 - `DELETE /api/v1/boards/:boardId` — Delete board (Tenant Admin / Org Admin)
-- `POST /api/v1/boards/:boardId/columns` — Create column
-- `PATCH /api/v1/columns/:columnId/position` — Reorder column
+- `POST /api/v1/boards/:boardId/columns` — Create column with contiguous integer position
+- `PUT /api/v1/columns/:columnId` — Rename column (Admin)
+- `POST /api/v1/columns/:columnId/move` — Reorder column position (Admin)
+- `DELETE /api/v1/columns/:columnId` — Delete empty column (rejected if column contains tasks)
 
 #### Tasks & Activities
-- `POST /api/v1/boards/:boardId/tasks` — Create task
-- `PATCH /api/v1/tasks/:taskId` — Update task details (title, description, assignee, priority, version check)
-- `PATCH /api/v1/tasks/:taskId/move` — Move task across columns or reorder (requires `columnId`, `position`, `version`)
-- `DELETE /api/v1/tasks/:taskId` — Delete task
-- `GET /api/v1/boards/:boardId/activities` — Get recent activity logs for board
+- `GET /api/v1/tasks` — Search or list tasks in active tenant workspace (`?q=`, `?boardId=`, `?limit=`)
+- `POST /api/v1/boards/:boardId/tasks` — Create task in column
+- `GET /api/v1/tasks/:taskId` — View task details
+- `PUT /api/v1/tasks/:taskId` — Update task details with OCC version check (title, description, assignee, priority, version)
+- `POST /api/v1/tasks/:taskId/move` — Move task across columns or reorder position with OCC version check
+- `DELETE /api/v1/tasks/:taskId` — Delete task with OCC version check (`?version=<n>`)
+- `GET /api/v1/boards/:boardId/activities` — Get recent chronological activity logs for board
 
 ### 9.2 WebSocket Event Contract
 
 | Event Name | Direction | Payload | Description |
 | :--- | :--- | :--- | :--- |
+| `join:tenant` | Client $\to$ Server | `{ tenantId }` | Request to enter authorized tenant workspace room |
+| `tenant:joined` | Server $\to$ Client | `{ success, room, tenantId, activeUsers }` | Acknowledge tenant workspace room entry |
+| `leave:tenant` | Client $\to$ Server | `{ tenantId }` | Exit tenant workspace room |
 | `join:board` | Client $\to$ Server | `{ boardId, tenantId }` | Request to enter authorized board room |
+| `room:joined` | Server $\to$ Client | `{ success, room, boardId, tenantId, activeUsers }` | Acknowledge board room entry |
 | `leave:board` | Client $\to$ Server | `{ boardId, tenantId }` | Exit board room |
-| `board:joined` | Server $\to$ Client | `{ boardId, activeUsers }` | Confirm room entry with active presence |
-| `task:created` | Server $\to$ Client | `{ task, actor }` | Broadcast new task added to column |
-| `task:updated` | Server $\to$ Client | `{ task, actor }` | Broadcast task field changes |
-| `task:moved` | Server $\to$ Client | `{ taskId, sourceColumnId, targetColumnId, position, version, actor }` | Broadcast task drag-and-drop move |
-| `task:deleted` | Server $\to$ Client | `{ taskId, columnId, actor }` | Broadcast task removal |
-| `presence:sync` | Server $\to$ Client | `{ boardId, activeUsers: [{ id, name, avatarUrl }] }` | Active users presence update |
+| `error:unauthorized` | Server $\to$ Client | `{ error, code }` | Emitted when room access is denied |
+| `room:kicked` | Server $\to$ Client | `{ tenantId, message }` | Disconnect user when workspace membership is revoked |
+| `task:created` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, task, version }` | Broadcast new task added to column |
+| `task:updated` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, task, version }` | Broadcast task field changes |
+| `task:moved` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, task, targetColumnId, newPosition, version }` | Broadcast task move/reorder |
+| `task:deleted` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, taskId, columnId, boardId }` | Broadcast task deletion |
+| `column:created` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, column }` | Broadcast column creation |
+| `column:updated` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, column }` | Broadcast column renaming |
+| `column:moved` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, column }` | Broadcast column position reordering |
+| `column:deleted` | Server $\to$ Client | `{ eventId, type, boardId, tenantId, timestamp, columnId, boardId }` | Broadcast empty column deletion |
+| `presence:sync` | Server $\to$ Client | `{ boardId, tenantId, activeUsers, timestamp }` | Board active users presence sync |
+| `tenant:presence:sync` | Server $\to$ Client | `{ tenantId, activeUsers, timestamp }` | Tenant workspace active users presence sync |
 
 ---
 
@@ -389,14 +415,16 @@ To guarantee architectural correctness and security, five mandatory acceptance t
 Every mutation broadcasts only **after** the PostgreSQL transaction successfully commits:
 | Event Name | Direction | Payload Structure | Trigger |
 | :--- | :--- | :--- | :--- |
-| `task:created` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, task, version }` | `POST /api/v1/boards/:boardId/tasks` |
-| `task:updated` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, task, version }` | `PUT /api/v1/tasks/:taskId` |
-| `task:moved` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, task, targetColumnId, newPosition, version }` | `POST /api/v1/tasks/:taskId/move` |
-| `task:deleted` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, taskId, columnId }` | `DELETE /api/v1/tasks/:taskId` |
-| `column:created`| Server $\to$ Room | `{ eventId, type, boardId, tenantId, column }` | `POST /api/v1/boards/:boardId/columns` |
-| `column:updated`| Server $\to$ Room | `{ eventId, type, boardId, tenantId, column }` | `PUT /api/v1/columns/:columnId` |
-| `column:deleted`| Server $\to$ Room | `{ eventId, type, boardId, tenantId, columnId }` | `DELETE /api/v1/columns/:columnId` |
-| `presence:sync` | Server $\to$ Room | `{ boardId, tenantId, activeUsers, timestamp }` | Join, leave, disconnect, or revocation |
+| `task:created` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, task, version }` | `POST /api/v1/boards/:boardId/tasks` |
+| `task:updated` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, task, version }` | `PUT /api/v1/tasks/:taskId` |
+| `task:moved` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, task, targetColumnId, newPosition, version }` | `POST /api/v1/tasks/:taskId/move` |
+| `task:deleted` | Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, taskId, columnId, boardId }` | `DELETE /api/v1/tasks/:taskId` |
+| `column:created`| Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, column }` | `POST /api/v1/boards/:boardId/columns` |
+| `column:updated`| Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, column }` | `PUT /api/v1/columns/:columnId` |
+| `column:moved`  | Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, column }` | `POST /api/v1/columns/:columnId/move` |
+| `column:deleted`| Server $\to$ Room | `{ eventId, type, boardId, tenantId, timestamp, columnId, boardId }` | `DELETE /api/v1/columns/:columnId` |
+| `presence:sync` | Server $\to$ Board Room | `{ boardId, tenantId, activeUsers, timestamp }` | Board join, leave, or disconnect |
+| `tenant:presence:sync` | Server $\to$ Tenant Room | `{ tenantId, activeUsers, timestamp }` | Tenant workspace join, leave, or disconnect |
 
 ## 12.4 Concurrency, Optimistic Locking & Conflict Recovery
 - **Atomic Optimistic Locking**: Tasks include a monotonic integer `version` incremented on every mutation.

@@ -17,9 +17,17 @@
   {
     "status": "healthy",
     "timestamp": "2026-11-01T11:55:00.000Z",
-    "database": {
-      "status": "connected",
-      "latencyMs": 2
+    "uptimeSeconds": 32,
+    "environment": "development",
+    "services": {
+      "server": {
+        "status": "up"
+      },
+      "database": {
+        "status": "connected",
+        "engine": "PostgreSQL",
+        "responseTimeMs": 8
+      }
     }
   }
   ```
@@ -38,16 +46,28 @@
     "password": "password123",
     "orgName": "Acme Tech",
     "orgSlug": "acme-tech",
-    "tenantName": "Engineering",
-    "tenantSlug": "engineering"
+    "tenantName": "Engineering"
   }
   ```
+  *(Note: `tenantName` is optional and defaults to `"General Workspace"`. The workspace slug is automatically derived from the tenant name; `tenantSlug` is not accepted as an input field.)*
 - **Response `201 Created`:** Returns user profile, organization, default tenant, and JWT token.
 
 ### `POST /api/v1/auth/login`
 - **Description:** Authenticates user via bcrypt password check; returns JWT token and memberships.
 - **Body:** `{ "email": "alice@acme.com", "password": "password123" }`
 - **Response `200 OK`:** Returns `{ token, user, memberships }`.
+
+### `POST /api/v1/auth/logout`
+- **Description:** Invalidate session; documents stateless JWT logout where the client purges the token from local storage and memory.
+- **Headers:** `Authorization: Bearer <token>`
+- **Body:** None
+- **Response `200 OK`:**
+  ```json
+  {
+    "success": true,
+    "message": "User logged out successfully. Invalidate local token cache."
+  }
+  ```
 
 ### `GET /api/v1/auth/me`
 - **Description:** Returns authenticated user profile, organization memberships, and tenant memberships.
@@ -85,9 +105,23 @@
 - **Query Parameter:** `?force=true` (Required if active workspaces or boards exist).
 - **Safe Deletion Policy:** Attempting deletion without `?force=true` when child entities exist returns `HTTP 400 Bad Request` with warning and dependent counts.
 
+### `GET /api/v1/organizations/:orgId/tenants`
+- **Description:** List all tenant workspaces in this organization.
+- **Headers:** `Authorization: Bearer <token>`
+- **Roles:** All organization members.
+- **Response `200 OK`:** Array of tenant workspace objects.
+
 ### `POST /api/v1/organizations/:orgId/tenants`
 - **Description:** Create a new tenant workspace in the organization (Org Admin only).
+- **Headers:** `Authorization: Bearer <token>`
 - **Body:** `{ "name": "Marketing", "slug": "marketing" }`
+- **Response `201 Created`:** Created tenant details.
+
+### `DELETE /api/v1/organizations/:orgId/members/:membershipId`
+- **Description:** Remove an Org Admin or organization member. Protected against removing the last Organization Administrator.
+- **Headers:** `Authorization: Bearer <token>`
+- **Roles:** Org Admin only.
+- **Response `200 OK`:** `{ "success": true, "message": "Organization member removed successfully" }`.
 
 ### `GET /api/v1/tenants/:tenantId`
 - **Description:** View specific tenant details.
@@ -100,6 +134,13 @@
 - **Headers:** `Authorization: Bearer <token>`
 - **Query Parameter:** `?force=true` (Required if boards or tasks exist in workspace).
 - **Safe Deletion Policy:** Attempting deletion without `?force=true` when boards exist returns `HTTP 400 Bad Request` with warning and dependent counts.
+
+### `GET /api/v1/tenants/:tenantId/activities`
+- **Description:** Get chronological audit activity logs for the entire tenant workspace, with optional board filtering.
+- **Headers:** `Authorization: Bearer <token>`
+- **Query Parameters:** `?boardId=<uuid>` (optional), `?limit=50` (optional, default 50).
+- **Roles:** Tenant members (`ORG_ADMIN`, `TENANT_ADMIN`, `MEMBER`).
+- **Response `200 OK`:** Array of tenant activity logs with actor metadata.
 
 ### `GET /api/v1/tenants/:tenantId/members`
 - **Description:** List members of the tenant workspace with roles.
@@ -118,7 +159,8 @@
 ## 4. Board APIs
 
 ### `GET /api/v1/boards`
-- **Headers:** `Authorization`, `X-Tenant-ID`
+- **Headers:** `Authorization: Bearer <token>`, `X-Tenant-ID: <uuid>`
+- **Query Params:** `?q=<string>` or `?search=<string>` (optional search filter by name or board UUID)
 - **Roles:** All tenant members (`ORG_ADMIN`, `TENANT_ADMIN`, `MEMBER`).
 - **Response `200 OK`:** Array of board summaries with `columnCount` and `taskCount`.
 
@@ -185,6 +227,16 @@
 ---
 
 ## 6. Task APIs & Optimistic Concurrency Control (OCC)
+
+### `GET /api/v1/tasks`
+- **Description:** Search or list tasks within the active tenant workspace.
+- **Headers:** `Authorization: Bearer <token>`, `X-Tenant-ID: <uuid>`
+- **Query Params:**
+  - `?q=<string>` or `?search=<string>`: Optional substring search against task title and description.
+  - `?boardId=<uuid>`: Optional board filter.
+  - `?limit=<int>`: Maximum results (default: 20).
+- **Roles:** All tenant members (`ORG_ADMIN`, `TENANT_ADMIN`, `MEMBER`).
+- **Response `200 OK`:** Array of task objects with assignee and column details.
 
 ### `POST /api/v1/boards/:boardId/tasks`
 - **Headers:** `Authorization`, `X-Tenant-ID`
@@ -298,3 +350,49 @@ All non-2xx responses follow a standardized error structure:
   }
 }
 ```
+
+---
+
+## 8. WebSocket Event Contracts (Socket.IO)
+
+The real-time collaboration layer connects via Socket.IO at `/socket.io` with Bearer JWT handshake authentication.
+
+### 8.1 Room Subscriptions & Lifecycle
+
+| Action | Direction | Event | Payload | Behavior / Verification |
+| :--- | :--- | :--- | :--- | :--- |
+| **Join Tenant** | Client $\to$ Server | `join:tenant` | `{ tenantId }` | Database membership check; assigns socket to `tenant:<tenantId>`. |
+| **Join Tenant Ack** | Server $\to$ Client | `tenant:joined` | `{ success: true, room, tenantId, activeUsers }` | Acknowledges tenant join with online workspace users. |
+| **Leave Tenant** | Client $\to$ Server | `leave:tenant` | `{ tenantId }` | Leaves tenant room, decrements socket count, syncs presence. |
+| **Join Board** | Client $\to$ Server | `join:board` | `{ tenantId, boardId }` | Validates board exists in tenant and user has membership; joins `tenant:<tId>:board:<bId>`. |
+| **Join Board Ack** | Server $\to$ Client | `room:joined` | `{ success: true, room, boardId, tenantId, activeUsers }` | Acknowledges board join with online board collaborators. *(Note: Event name is `room:joined`, not `board:joined`)*. |
+| **Leave Board** | Client $\to$ Server | `leave:board` | `{ tenantId, boardId }` | Exits board room, updates active users stack via `presence:sync`. |
+| **Unauthorized** | Server $\to$ Client | `error:unauthorized` | `{ error, code: 'FORBIDDEN' \| 'NOT_FOUND' }` | Emitted when attempting unauthorized tenant or board room access. |
+| **Revocation** | Server $\to$ Client | `room:kicked` | `{ tenantId, message }` | Triggered when user membership is revoked; drops subscriptions. |
+
+### 8.2 Real-Time Broadcast Payloads
+
+All board mutation events are broadcast **strictly after the PostgreSQL transaction commits**:
+
+| Event | Target Room | Broadcast Payload Fields |
+| :--- | :--- | :--- |
+| `task:created` | Board room | `{ eventId, type: 'task:created', boardId, tenantId, timestamp, task, version }` |
+| `task:updated` | Board room | `{ eventId, type: 'task:updated', boardId, tenantId, timestamp, task, version }` |
+| `task:moved` | Board room | `{ eventId, type: 'task:moved', boardId, tenantId, timestamp, task, targetColumnId, newPosition, version }` |
+| `task:deleted` | Board room | `{ eventId, type: 'task:deleted', boardId, tenantId, timestamp, taskId, columnId, boardId }` |
+| `column:created` | Board room | `{ eventId, type: 'column:created', boardId, tenantId, timestamp, column }` |
+| `column:updated` | Board room | `{ eventId, type: 'column:updated', boardId, tenantId, timestamp, column }` |
+| `column:moved` | Board room | `{ eventId, type: 'column:moved', boardId, tenantId, timestamp, column }` |
+| `column:deleted` | Board room | `{ eventId, type: 'column:deleted', boardId, tenantId, timestamp, columnId, boardId }` |
+| `presence:sync` | Board room | `{ boardId, tenantId, activeUsers, timestamp }` |
+| `tenant:presence:sync`| Tenant room | `{ tenantId, activeUsers, timestamp }` |
+
+*(Note: Broadcast payloads contain `eventId`, `timestamp`, and entity models. They do not contain `actorId` or `clientRequestId` fields).*
+
+### 8.3 Client Synchronization, Ordering & Conflict Protocol
+
+1. **Event-ID Deduplication:** Clients track processed event IDs (`processedEventsRef`, bounded to 200 items). Duplicate events received via reconnections or network echoes are immediately dropped.
+2. **Synchronous Version Comparison:** Local `taskVersionMap` caches the authoritative monotonic version for each task. If an incoming `task:moved` or `task:updated` event has a version lower than the cached version (`event.version < localTask.version`), it is safely discarded as a stale broadcast.
+3. **Authoritative Snapshot Reconciliation:** On structural board changes (column move, task move across columns) and socket reconnections, the client triggers `fetchBoardSnapshot(currentBoardId)` (`GET /api/v1/boards/:boardId`) to ensure sibling card positions and metadata are completely synchronized with PostgreSQL.
+4. **Optimistic Updates & HTTP 409 Rollback:** Frontend applies optimistic UI adjustments immediately. If the server rejects the request with HTTP 409 Conflict, the client displays a conflict notification modal and refreshes to the latest authoritative database state.
+5. **Reconnection Synchronization:** Upon network recovery, the client automatically re-authenticates, re-emits `join:tenant` and `join:board`, and triggers `onReconnectResync` to reload authoritative board data without manual refresh.

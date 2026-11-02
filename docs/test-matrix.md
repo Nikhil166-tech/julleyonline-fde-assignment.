@@ -39,43 +39,53 @@ This test matrix outlines the testing strategy for the **JulleyOnline Multi-Tena
 
 ---
 
-## 3. Executed Acceptance Tests (Phases 1A & 1B)
+## 3. Executed Acceptance Tests (Phases 1A through 4)
 
 The test suites are fully automated in `backend/tests/` and run via `pnpm test` (`node --test`).
 
-### Phase 1A: Backend Foundation (8/8 Passing)
+### Phase 1A: Backend Foundation (9/9 Passing)
 1. **TC-CFG-01**: Parses valid configuration environment variables cleanly.
 2. **TC-CFG-02**: Throws descriptive Zod error when `DATABASE_URL` is missing or invalid.
 3. **TC-CFG-03**: Throws validation error when `PORT` is outside 1–65535 range.
 4. **TC-CFG-04**: Throws validation error when `JWT_SECRET` is less than 16 characters.
-5. **TC-HLT-01**: `checkDatabaseHealth()` executes `SELECT 1 as health_check` and reports round-trip latency.
-6. **TC-HLT-02**: `GET /api/health` returns HTTP 200 with server `up` and database `connected`.
-7. **TC-ERR-01**: Unmapped routes return HTTP 404 with standard JSON `{ success: false, error: { code: 'NOT_FOUND' } }`.
-8. **TC-ERR-02**: Custom domain errors (`ConflictError`, `ForbiddenError`, `ValidationError`) format with appropriate HTTP status codes (409, 403, 400).
+5. **TC-SAF-01**: `validateTestDatabaseUrl` allows `julleyonline_kanban_test` and safely aborts dev, prod, or spoofed URLs without credential leaks.
+6. **TC-HLT-01**: `checkDatabaseHealth()` executes `SELECT 1 as health_check` and reports round-trip latency.
+7. **TC-HLT-02**: `GET /api/health` returns HTTP 200 with server `up` and database `connected`.
+8. **TC-ERR-01**: Unmapped routes return HTTP 404 with standard JSON `{ success: false, error: { code: 'NOT_FOUND' } }`.
+9. **TC-ERR-02**: Custom domain errors (`ConflictError`, `ForbiddenError`, `ValidationError`) format with appropriate HTTP status codes (409, 403, 400).
 
-### Phase 1B: Authentication, Tenant Scoping & RBAC (21/21 Passing)
+### Phase 1B: Authentication, Tenant Scoping & RBAC (29/29 Passing)
 1. **TC-AUT-01**: `POST /api/v1/auth/register` atomically bootstraps User, Organization, Tenant, and assigns initial `ORG_ADMIN`.
 2. **TC-AUT-02**: Registration rejects duplicate user email with HTTP 409 Conflict.
 3. **TC-AUT-03**: Registration rejects duplicate organization slug with HTTP 409 Conflict.
 4. **TC-AUT-04**: Registration rejects invalid payload (short password, invalid email) with HTTP 400 Validation Error.
 5. **TC-AUT-05**: Registration strips or rejects malicious role injection (privilege escalation defense).
 6. **TC-AUT-06**: Concurrent simultaneous registration attempts handled atomically with zero database corruption.
-7. **TC-LOG-01**: `POST /api/v1/auth/login` verifies bcrypt password hash and returns JWT with memberships without exposing password hashes.
-8. **TC-LOG-02**: Login rejects wrong password with HTTP 401 Unauthorized.
-9. **TC-LOG-03**: `GET /api/v1/auth/me` returns authenticated profile when valid JWT is supplied.
-10. **TC-LOG-04**: Protected routes reject missing token with HTTP 401 Unauthorized.
-11. **TC-LOG-05**: Expired JWT returns HTTP 401 Unauthorized with token expired error.
-12. **TC-LOG-06**: Tampered or forged JWT (invalid signature) returns HTTP 401 Unauthorized.
-13. **TC-LOG-07**: `POST /api/v1/auth/logout` succeeds with valid JWT and documents stateless token discard.
-14. **TC-TNT-01**: `requireTenantContext` allows tenant member to access their authorized workspace via `X-Tenant-ID`.
-15. **TC-TNT-02**: `requireTenantContext` allows Org Admin with org-level membership to access any subordinate tenant.
-16. **TC-TNT-03**: `requireTenantContext` strictly blocks cross-tenant access with HTTP 403 Forbidden.
-17. **TC-TNT-04**: `requireTenantContext` blocks cross-organization access even if the user is an Org Admin of another org.
-18. **TC-TNT-05**: `requireTenantContext` rejects missing `X-Tenant-ID` header with HTTP 400 Validation Error.
-19. **TC-REV-01**: Membership revocation in database takes effect immediately, rejecting subsequent requests with HTTP 403.
-20. **TC-REV-02**: Membership role demotion (Admin $\to$ Member) in database immediately denies administrative access on next request.
-21. **TC-RAT-01**: Authentication rate limiting throttles excessive requests with HTTP 429 Too Many Requests.
-### Phase 2A: Organization, Tenant and Membership Management (20/20 Passing)
+7. **TC-AUT-07**: Registers successfully without organizationSlug or with empty string slugs (auto-generation).
+8. **TC-AUT-08**: Rejects non-alphanumeric organization name producing empty slug with HTTP 400 Validation Error.
+9. **TC-LOG-01**: `POST /api/v1/auth/login` verifies bcrypt password hash and returns JWT with memberships without exposing password hashes.
+10. **TC-LOG-02**: Login rejects wrong password with HTTP 401 Unauthorized.
+11. **TC-LOG-03**: `GET /api/v1/auth/me` returns authenticated profile when valid JWT is supplied.
+12. **TC-LOG-04**: Protected routes reject missing token with HTTP 401 Unauthorized.
+13. **TC-LOG-05**: Expired JWT returns HTTP 401 Unauthorized with token expired error.
+14. **TC-LOG-06**: Tampered or forged JWT (invalid signature) returns HTTP 401 Unauthorized.
+15. **TC-LOG-07**: `POST /api/v1/auth/logout` succeeds with valid JWT and documents stateless token discard.
+16. **TC-TNT-01**: `requireTenantContext` allows tenant member to access their authorized workspace via `X-Tenant-ID`.
+17. **TC-TNT-02**: `requireTenantContext` allows Org Admin with org-level membership to access any subordinate tenant.
+18. **TC-TNT-03**: `requireTenantContext` strictly blocks cross-tenant access with HTTP 403 Forbidden.
+19. **TC-TNT-04**: `requireTenantContext` blocks cross-organization access even if the user is an Org Admin of another org.
+20. **TC-TNT-05**: `requireTenantContext` rejects missing `X-Tenant-ID` header with HTTP 400 Validation Error.
+21. **TC-TNT-06**: Org Admin assigned as Member to tenant retains `effectiveRole: ORG_ADMIN`.
+22. **TC-REV-01**: Membership revocation in database takes effect immediately, rejecting subsequent requests with HTTP 403.
+23. **TC-REV-02**: Membership role demotion (Admin $\to$ Member) in database immediately denies administrative access on next request.
+24. **TC-RAT-01**: Authentication rate limiting throttles excessive requests with HTTP 429 Too Many Requests.
+25. **TC-PER-01**: Bob can act as Tenant Admin in Engineering.
+26. **TC-PER-02**: Bob can act as Member in Marketing, but cannot perform admin actions in Marketing.
+27. **TC-PER-03**: Bob cannot execute Org Admin exclusive actions in any tenant.
+28. **TC-PER-04**: Charlie cannot access Marketing or any Nexus organization data.
+29. **TC-PER-05**: Alice has Org Admin access across all Acme tenants, but is strictly restricted from Nexus.
+
+### Phase 2A: Organization, Tenant and Membership Management (28/28 Passing)
 1. **TC-ORG-01**: Org Admin lists organizations and views all tenants within their organization.
 2. **TC-ORG-02**: Standard Member lists organizations and views only explicitly assigned tenants.
 3. **TC-ORG-03**: `GET /api/v1/organizations/:orgId` returns organization details to authorized members.
@@ -97,7 +107,7 @@ The test suites are fully automated in `backend/tests/` and run via `pnpm test` 
 19. **TC-SWT-02**: `POST /api/v1/auth/switch-context` switches active tenant context safely and resolves effective role.
 20. **TC-SWT-03**: Rejects switching to an unauthorized tenant with HTTP 403 Forbidden.
 
-### Phase 2B: Complete Board, Column and Task Backend APIs (28/28 Passing)
+### Phase 2B: Complete Board, Column and Task Backend APIs (40/40 Passing)
 1. **TC-BRD-01**: Bob (Tenant Admin) creates a board with default workflow columns (`Backlog`, `In Progress`, `Done`) and activity log (201).
 2. **TC-BRD-02**: Charlie (Member) attempting to create a board is rejected with HTTP 403 Forbidden.
 3. **TC-BRD-03**: List boards returns boards scoped strictly to the active tenant workspace.
@@ -190,6 +200,7 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `SEL-04` | Identical Names | Support for multiple boards with identical names via distinct short IDs | **PASS** |
 | `SEL-05` | Tenant Isolation | Tenant switching strictly scopes board selector and prevents cross-tenant UI bleed | **PASS** |
 | `SEL-06` | RBAC Visibility | Create Board action in BoardSelector visible for Admins and hidden for Members | **PASS** |
+| `SEL-07` | Tenant Isolation Race | Tenant-switching race condition: delayed board-list response from prior workspace is dropped and never triggers 403 | **PASS** |
 
 ### Real End-to-End Persistence & OCC Playwright Tests (`tests/e2e.spec.js`)
 | Test ID | Category | Scenario / Assertion | Status |
