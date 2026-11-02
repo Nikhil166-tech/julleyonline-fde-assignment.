@@ -516,7 +516,11 @@ test.describe('Phase 4: Real-Time Collaboration, Presence, Concurrency & Recover
     await descInput.fill('Updated to version 2 description');
     // Blur to save
     await drawer.locator('input[type="text"]').first().click();
-    await page.waitForTimeout(600);
+    
+    // Verify save feedback toast pop-up appears with 'Description added'
+    const saveToast = drawer.locator('[data-testid="task-save-toast"]');
+    await expect(saveToast).toBeVisible({ timeout: 5000 });
+    await expect(saveToast).toContainText('Description added');
 
     // 4. Verify task description remains the updated version 2 and is not reverted
     await expect(descInput).toHaveValue('Updated to version 2 description');
@@ -524,7 +528,7 @@ test.describe('Phase 4: Real-Time Collaboration, Presence, Concurrency & Recover
     // 5. Verify priority update in drawer triggers optimistic version tracking and invalidation
     const prioritySelect = drawer.locator('select').first();
     await prioritySelect.selectOption('URGENT');
-    await page.waitForTimeout(600);
+    await expect(saveToast).toContainText('Priority updated', { timeout: 5000 });
     await expect(prioritySelect).toHaveValue('URGENT');
   });
 });

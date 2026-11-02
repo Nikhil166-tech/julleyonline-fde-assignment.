@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, ExternalLink, Trash2, Calendar, ShieldCheck, Clock, Save, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, ExternalLink, Trash2, Calendar, ShieldCheck, Clock, Save, AlertCircle, Check } from 'lucide-react';
 import { PriorityBadge } from '../../components/ui/Badge';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
@@ -28,6 +28,26 @@ export function TaskDetailsDrawer({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('details');
+  const [toastMessage, setToastMessage] = useState('');
+  const toastTimeoutRef = useRef(null);
+
+  const showToast = (message) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMessage(message);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage('');
+    }, 3000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setTitle(task.title);
@@ -121,6 +141,25 @@ export function TaskDetailsDrawer({
         });
 
         onTaskUpdated(res.data);
+
+        // Feedback toast pop-up notification on save
+        if (updatedFields.description !== undefined) {
+          if (!task.description && updatedFields.description) {
+            showToast('Description added');
+          } else if (task.description && !updatedFields.description) {
+            showToast('Description removed');
+          } else {
+            showToast('Description updated');
+          }
+        } else if (updatedFields.title !== undefined) {
+          showToast('Title updated');
+        } else if (updatedFields.priority !== undefined) {
+          showToast('Priority updated');
+        } else if (updatedFields.assignedToUserId !== undefined) {
+          showToast(updatedFields.assignedToUserId ? 'Assignee updated' : 'Assignee removed');
+        } else if (updatedFields.dueDate !== undefined) {
+          showToast(updatedFields.dueDate ? 'Due date updated' : 'Due date removed');
+        }
       }
     } catch (err) {
       if (err.statusCode === 409) {
@@ -323,6 +362,29 @@ export function TaskDetailsDrawer({
           </div>
         </div>
       </div>
+
+      {/* Floating Save Feedback Toast Pop-up */}
+      {toastMessage && (
+        <div
+          data-testid="task-save-toast"
+          role="status"
+          className="absolute bottom-4 left-4 right-4 bg-slate-900 text-white px-3.5 py-2.5 rounded-xl shadow-2xl flex items-center justify-between text-xs font-medium z-40 border border-slate-800 animate-in fade-in slide-in-from-bottom-3 duration-200"
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <Check className="w-3.5 h-3.5" />
+            </div>
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage('')}
+            className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors"
+            title="Dismiss notification"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
