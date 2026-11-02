@@ -464,17 +464,41 @@ export class TaskService {
         throw new NotFoundError('Task not found or was already deleted by another collaborator');
       }
 
-      // 5. OCC version verification
+      // 5. Version pre-check: quick fail if already stale
       if (lockedTask.version !== version) {
         throw new ConflictError('Task has been modified by another collaborator. Please refresh.', {
           currentTask: lockedTask,
         });
       }
 
-      // 6. Delete task atomically
-      await tx.task.delete({
-        where: { id: taskId },
+      // 6. Atomic version-conditional deletion
+      const deleteResult = await tx.task.deleteMany({
+        where: {
+          id: taskId,
+          tenantId,
+          version, // Atomic OCC version check
+        },
       });
+
+      if (deleteResult.count === 0) {
+        // Distinguish whether task was already deleted or has a stale version conflict
+        const checkTask = await tx.task.findFirst({
+          where: { id: taskId, tenantId },
+          include: {
+            creator: { select: { id: true, name: true, email: true, avatarUrl: true } },
+            assignee: { select: { id: true, name: true, email: true, avatarUrl: true } },
+            column: { select: { id: true, name: true } },
+          },
+        });
+
+        if (!checkTask) {
+          throw new NotFoundError('Task not found or was already deleted by another collaborator');
+        }
+
+        throw new ConflictError('Task has been modified by another collaborator. Please refresh.', {
+          currentTask: checkTask,
+        });
+      }
 
       // 7. Close contiguous gap in the column
       await tx.$executeRaw`

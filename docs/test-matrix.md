@@ -160,6 +160,9 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `TC-OCC-06` | OCC Deletion | Task deletion with stale version returns HTTP 409 Conflict, latest task state, and preserves task | **PASS** |
 | `TC-OCC-07` | OCC Deletion | Task deletion with missing version returns HTTP 400 Validation Error | **PASS** |
 | `TC-OCC-08` | OCC Deletion | Task deletion using authoritative version succeeds and maintains contiguous column ordering | **PASS** |
+| `TC-OCC-09` | OCC Concurrency | Concurrent edit versus deletion race resolves atomically without corruption | **PASS** |
+| `TC-OCC-10` | OCC Concurrency | Concurrent task move versus deletion race resolves safely under column lock | **PASS** |
+| `TC-OCC-11` | OCC Concurrency | Concurrent double deletion of the same task yields exactly 1 success and 1 HTTP 404 | **PASS** |
 
 
 ### Advanced Org/Tenant CRUD & Safe Deletion Tests (`tests/phase2a.test.js`)
@@ -204,4 +207,4 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `COL-06` | Network Recovery | Disconnecting socket updates status to disconnected; on reconnect, auto-rejoins room and refetches snapshot | **PASS** |
 | `COL-07` | Undo Concurrency | Charlie's concurrent update blocks Bob's stale Undo with HTTP 409 and protects Charlie's changes | **PASS** |
 
-**Total Automated Suite**: 105 Backend Unit & Integration Tests (100% pass) + 20 Playwright End-to-End Tests (100% pass) = 125 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.
+**Total Automated Suite**: 108 Backend Unit & Integration Tests (100% pass) + 20 Playwright End-to-End Tests (100% pass) = 128 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.

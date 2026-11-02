@@ -21,7 +21,7 @@ Cross-cutting entities:
 erDiagram
     ORGANIZATION ||--o{ TENANT : "owns (1:N)"
     ORGANIZATION ||--o{ MEMBERSHIP : "has (1:N)"
-    TENANT ||--o{ MEMBERSHIP : "scopes (1:N)"
+    TENANT o|--o{ MEMBERSHIP : "scopes (0:N)"
     TENANT ||--o{ BOARD : "partitions (1:N)"
     TENANT ||--o{ COLUMN : "partitions (1:N)"
     TENANT ||--o{ TASK : "partitions (1:N)"
@@ -38,7 +38,7 @@ erDiagram
     BOARD ||--o{ ACTIVITY_LOG : "tracks (1:N)"
 
     COLUMN ||--o{ TASK : "orders (1:N)"
-    TASK ||--o{ ACTIVITY_LOG : "referenced_in (0:N)"
+    TASK o|--o{ ACTIVITY_LOG : "references (0:N)"
 
     ORGANIZATION {
         uuid id PK
@@ -165,12 +165,14 @@ Global authentication and identity principal.
 
 ### 3.4 `memberships`
 Role-based permission scoping.
-- **Primary Key**: `id` (`uuid`)
+- **Primary Key**: `id` (`uuid`, generated via Prisma `@default(uuid())`)
 - **Foreign Keys**:
   - `user_id` -> `users(id)` ON DELETE CASCADE
   - `org_id` -> `organizations(id)` ON DELETE CASCADE
   - `tenant_id` -> `tenants(id)` ON DELETE CASCADE (Nullable: `NULL` represents organization-wide administrator)
-- **Unique Constraints**: `(user_id, org_id, tenant_id)`
+- **Unique Constraints**:
+  - `UNIQUE (user_id, org_id, tenant_id)`
+  - Partial Unique Index: `idx_unique_org_admin_membership` on `(user_id, org_id) WHERE tenant_id IS NULL` to prevent duplicate org-level memberships.
 - **Indexes**:
   - `idx_memberships_user_tenant` on `(user_id, tenant_id)`
   - `idx_memberships_tenant_user` on `(tenant_id, user_id)`
@@ -231,13 +233,19 @@ Immutable audit trail capturing all state mutations.
 
 ---
 
-## 4. Multi-Tenant Isolation & Safety Policies
+## 4. Multi-Tenant Isolation, Ordering & Safety Invariants
 
-1. **Strict Tenant Scoping on Queries**:
-   Every database query for boards, columns, tasks, and activities includes `where: { tenantId }`. Cross-tenant queries are blocked at both service and middleware layers.
-2. **Safe Deletion Policy**:
+1. **Identifier & Timestamp Management**:
+   UUID primary keys and timestamp updates are managed at the application layer via Prisma ORM (`@default(uuid())`, `@updatedAt`) rather than custom PostgreSQL trigger functions.
+2. **Tenant Scoping Architecture**:
+   Foreign keys preserve referential integrity across the data tier. Strict tenant data isolation is enforced through authenticated context validation in `tenant.middleware.js` and mandatory `where: { tenantId }` scoping on every operational database query.
+3. **Safe Deletion Policy**:
    - `DELETE /api/v1/organizations/:id` and `DELETE /api/v1/tenants/:id` verify active resources (boards, tasks).
    - If subordinate resources exist, deletion is blocked with `HTTP 400 Bad Request` unless the caller explicitly passes `?force=true`.
-3. **Optimistic Concurrency Control (OCC)**:
-   - All task reordering and editing mutations check `where: { id: taskId, version: expectedVersion }`.
-   - On mismatch, transactions abort and return `409 Conflict` containing the current task version, latest position, and latest column assignment.
+4. **Optimistic Concurrency Control (OCC) & Deletion Safety**:
+   - All task mutations and deletions enforce atomic version checks (`where: { id: taskId, tenantId, version }`).
+   - If a collaborator modified the task in the interim, mutations and deletions abort with `HTTP 409 Conflict` and return the latest authoritative server state.
+5. **Transactional Contiguous Ordering**:
+   Task positions (`position: 0, 1, 2, ... N-1`) within each column are maintained contiguously inside transactions serialized under column row locks (`SELECT 1 FROM columns WHERE id = ... FOR UPDATE`). Position gaps are closed automatically upon deletion and reordering.
+6. **Activity Log Lifecycle**:
+   Activity logs track operations on boards and tasks. In line with PostgreSQL foreign key cascading rules, deleting an organization, tenant workspace, or user cascades to delete related activity records, and deleting a task sets `task_id` to `NULL` (`ON DELETE SET NULL`).

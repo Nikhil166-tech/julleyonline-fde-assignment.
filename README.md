@@ -1,6 +1,6 @@
 # JulleyOnline — Enterprise Multi-Tenant SaaS Kanban Platform
 
-[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-105%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
+[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-108%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
 [![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-20%20Passed-blue.svg)](#test-suite-and-verification-evidence)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Prisma-indigo.svg)](#architecture-overview)
 [![Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO%20%2B%20Presence-amber.svg)](#real-time-collaboration--presence)
@@ -78,13 +78,21 @@ JulleyOnline enforces a two-tier multi-tenancy model:
 ```mermaid
 erDiagram
     ORGANIZATION ||--o{ TENANT : contains
-    ORGANIZATION ||--o{ USER : employs
-    TENANT ||--o{ MEMBERSHIP : assigns
+    ORGANIZATION ||--o{ MEMBERSHIP : has
+    TENANT o|--o{ MEMBERSHIP : scopes
     USER ||--o{ MEMBERSHIP : holds
     TENANT ||--o{ BOARD : owns
+    TENANT ||--o{ COLUMN : owns
+    TENANT ||--o{ TASK : owns
+    TENANT ||--o{ ACTIVITY_LOG : logs
+    USER ||--o{ BOARD : creates
+    USER ||--o{ TASK : creates
+    USER o|--o{ TASK : assigned_to
     BOARD ||--o{ COLUMN : defines
-    COLUMN ||--o{ TASK : contains
+    BOARD ||--o{ TASK : contains
     BOARD ||--o{ ACTIVITY_LOG : audits
+    COLUMN ||--o{ TASK : contains
+    TASK o|--o{ ACTIVITY_LOG : references
 ```
 
 1. **Organization (Top-Level Boundary):**
@@ -123,6 +131,20 @@ JulleyOnline implements granular, context-aware RBAC evaluated at request time a
 | **Access Activity History** | Yes | Yes | Yes | No |
 | **Real-time Collaboration & Presence**| Yes | Yes | Yes | No |
 
+
+
+### Database Integrity, Indexing & Scoping Invariants
+
+1. **Identifier & Timestamp Generation:** Primary key UUIDs (`@default(uuid())`) and mutation timestamps (`@updatedAt`) are generated and managed by Prisma ORM at the application layer to maintain database portability across PostgreSQL instances without requiring custom server-side functions.
+2. **Tenant Scoping Architecture:** Foreign keys enforce strict referential integrity across all eight relational tables. Logical tenant boundaries are enforced at the backend through mandatory `tenant.middleware.js` token and membership verification, combined with explicit `where: { tenantId }` constraints on every operational query.
+3. **Organization Membership Uniqueness (`idx_unique_org_admin_membership`):** Standard PostgreSQL `UNIQUE (user_id, org_id, tenant_id)` treats `NULL` as distinct per the SQL standard. To prevent duplicate organization-level administrative roles when `tenant_id` is `NULL`, migration `20261031175300_org_membership_unique` enforces a partial unique index:
+   ```sql
+   CREATE UNIQUE INDEX "idx_unique_org_admin_membership" 
+   ON "memberships"("user_id", "org_id") 
+   WHERE "tenant_id" IS NULL;
+   ```
+4. **Activity Logs Lifecycle:** Activity logs provide an audit trail of task moves, edits, and assignments. In accordance with database cascading rules, deleting an organization, tenant workspace, or user cascades to delete their associated activity logs, and deleting a task sets `task_id` to `NULL` (`ON DELETE SET NULL`).
+5. **Transactional Contiguous Ordering:** Task positions (`0, 1, ... N-1`) within columns are maintained contiguously inside PostgreSQL transactions serialized under column row locks (`SELECT 1 FROM columns WHERE id = ... FOR UPDATE`). This application-level serialization prevents decimal indexing drift while allowing flexible reordering without database-level unique index lock deadlocks.
 
 ### Organization & Workspace Deletion Permissions & Forced Deletion Policy
 
@@ -229,7 +251,7 @@ High-fidelity screenshots captured directly from the running application:
 ### 1. Repository Setup
 
 ```bash
-git clone https://github.com/Nikhil166-tech/julleyonline-fde-assignment..git
+git clone https://github.com/Nikhil166-tech/julleyonline-fde-assignment..git julleyonline-fde-assignment
 cd julleyonline-fde-assignment
 ```
 
@@ -293,9 +315,9 @@ Password for all pre-seeded accounts: **`password123`**
 
 ## Test Suite and Verification Evidence
 
-JulleyOnline includes **125 fully automated positive, negative, security, and concurrency tests**:
+JulleyOnline includes **128 fully automated positive, negative, security, and concurrency tests**:
 
-### Running Backend Tests (105 Tests)
+### Running Backend Tests (108 Tests)
 
 ```bash
 cd backend
@@ -306,7 +328,7 @@ pnpm test
 - **Phase 1A: Backend Foundation (8 tests):** Config validation, health check, custom domain error handlers.
 - **Phase 1B: Authentication & RBAC (27 tests):** Registration atomicity, auto slug generation, empty slug tolerance, bcrypt hashing, JWT tampering, dynamic membership revocation.
 - **Phase 2A: Organization & Tenant Management (27 tests):** Workspace CRUD, safe deletion policy with dependency checks, context switching, tenant-wide activity audit.
-- **Phase 2B: Boards, Columns & OCC (32 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, HTTP 409 conflict contract, concurrent creation serialization.
+- **Phase 2B: Boards, Columns & OCC (35 tests):** Board CRUD, column locking, contiguous integer task reordering, OCC version incrementing, versioned task deletion OCC, edit/delete race resolution, move/delete race resolution, double-deletion race handling, HTTP 409 conflict contract, concurrent creation serialization.
 - **Phase 4: Socket.IO & Collaboration (11 tests):** JWT socket handshake, room isolation, multi-tab presence deduplication, post-commit broadcasts, immediate WebSocket revocation, tenant room switching.
 
 ### Running Frontend Playwright Tests (20 Tests)

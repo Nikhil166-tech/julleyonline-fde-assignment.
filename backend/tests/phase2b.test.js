@@ -937,6 +937,131 @@ describe('Phase 2B: Complete Board, Column and Task Backend APIs Test Suite', ()
       assert.ok(posB);
       assert.equal(posB.position, tA.position);
     });
+
+    it('TC-OCC-09: Concurrent edit versus deletion race resolves atomically without corruption', async () => {
+      // 1. Create task at v1
+      const res = await fetch(`${baseUrl}/api/v1/boards/${testBoardId}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({ columnId: backlogColId, title: 'Edit vs Delete Race' }),
+      });
+      const { data: task } = await res.json();
+      assert.equal(task.version, 1);
+
+      // 2. Fire simultaneous edit (v1 -> v2) and deletion (at v1)
+      const [editRes, delRes] = await Promise.all([
+        fetch(`${baseUrl}/api/v1/tasks/${task.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bobToken}`,
+            'X-Tenant-ID': acmeEngTenant.id,
+          },
+          body: JSON.stringify({ title: 'Simultaneous Edit Winner', version: 1 }),
+        }),
+        fetch(`${baseUrl}/api/v1/tasks/${task.id}?version=1`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${aliceToken}`,
+            'X-Tenant-ID': acmeEngTenant.id,
+          },
+        }),
+      ]);
+
+      const statuses = [editRes.status, delRes.status].sort();
+      // One operation must succeed with 200, the other must fail safely (409 or 404)
+      assert.ok(statuses.includes(200), 'At least one operation must succeed with 200');
+      assert.ok(statuses.includes(409) || statuses.includes(404), 'Losing operation must receive 409 Conflict or 404 Not Found');
+
+      if (editRes.status === 200) {
+        assert.equal(delRes.status, 409);
+        const conflictData = await delRes.json();
+        assert.equal(conflictData.error.code, 'CONFLICT');
+        assert.equal(conflictData.error.details.currentTask.version, 2);
+      }
+    });
+
+    it('TC-OCC-10: Concurrent task move versus deletion race resolves safely under column lock', async () => {
+      // 1. Create task at v1
+      const res = await fetch(`${baseUrl}/api/v1/boards/${testBoardId}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({ columnId: backlogColId, title: 'Move vs Delete Race' }),
+      });
+      const { data: task } = await res.json();
+
+      // 2. Fire simultaneous move (to inProgress) and deletion (at v1)
+      const [moveRes, delRes] = await Promise.all([
+        fetch(`${baseUrl}/api/v1/tasks/${task.id}/move`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bobToken}`,
+            'X-Tenant-ID': acmeEngTenant.id,
+          },
+          body: JSON.stringify({ targetColumnId: inProgressColId, newPosition: 0, version: 1 }),
+        }),
+        fetch(`${baseUrl}/api/v1/tasks/${task.id}?version=1`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${aliceToken}`,
+            'X-Tenant-ID': acmeEngTenant.id,
+          },
+        }),
+      ]);
+
+      const statuses = [moveRes.status, delRes.status].sort();
+      assert.ok(statuses.includes(200));
+      assert.ok(statuses.includes(409) || statuses.includes(404));
+    });
+
+    it('TC-OCC-11: Concurrent double deletion of the same task yields exactly 1 success and 1 HTTP 404', async () => {
+      // 1. Create task at v1
+      const res = await fetch(`${baseUrl}/api/v1/boards/${testBoardId}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({ columnId: backlogColId, title: 'Double Delete Race' }),
+      });
+      const { data: task } = await res.json();
+
+      // 2. Fire simultaneous deletions with version 1
+      const [delRes1, delRes2] = await Promise.all([
+        fetch(`${baseUrl}/api/v1/tasks/${task.id}?version=1`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${aliceToken}`,
+            'X-Tenant-ID': acmeEngTenant.id,
+          },
+        }),
+        fetch(`${baseUrl}/api/v1/tasks/${task.id}?version=1`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${bobToken}`,
+            'X-Tenant-ID': acmeEngTenant.id,
+          },
+        }),
+      ]);
+
+      const statuses = [delRes1.status, delRes2.status].sort();
+      // Exactly one succeeds with 200, second receives 404 Not Found (already deleted)
+      assert.deepEqual(statuses, [200, 404]);
+
+      // Confirm task no longer exists
+      const dbTask = await prisma.task.findUnique({ where: { id: task.id } });
+      assert.equal(dbTask, null);
+    });
   });
 
   // =============================================================
