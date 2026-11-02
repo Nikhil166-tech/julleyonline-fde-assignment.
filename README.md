@@ -17,7 +17,7 @@ Evaluators can directly access all 5 key assignment deliverables below:
 2. **Database Architecture & ER Diagram:** [`docs/er-diagram.md`](docs/er-diagram.md) — 8-entity Mermaid ER diagram, foreign keys, constraints, and cascade policies.
 3. **API & Real-Time WebSocket Documentation:** [`docs/api-documentation.md`](docs/api-documentation.md) — Complete REST endpoints, Zod schemas, OCC error payloads, and Socket.IO events.
 4. **Requirement Traceability Matrix (RTM):** [`docs/requirement-traceability-matrix.md`](docs/requirement-traceability-matrix.md) — Comprehensive matrix mapping requirements to source files, tests, and verification evidence.
-5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 140 passing automated tests across normal, boundary, security, and concurrency categories.
+5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 139 passing automated tests across normal, boundary, security, and concurrency categories.
 
 ## Table of Contents
 
@@ -315,7 +315,7 @@ Password for all pre-seeded accounts: **`password123`**
 
 ## Test Suite and Verification Evidence
 
-JulleyOnline includes **140 fully automated positive, negative, security, and concurrency tests**:
+JulleyOnline includes **139 fully automated positive, negative, security, and concurrency tests**:
 
 ### Running Backend Tests (117 Tests)
 
