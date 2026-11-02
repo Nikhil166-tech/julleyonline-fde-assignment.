@@ -27,6 +27,28 @@ function validateUuidParam(paramName) {
 router.use(authenticateToken);
 router.use(requireTenantContext);
 
+// GET /api/v1/tasks - Search or list tasks in active tenant workspace
+router.get('/', async (req, res, next) => {
+  try {
+    const query = req.query.q || req.query.search || null;
+    const boardId = req.query.boardId || null;
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 20;
+
+    const tasks = await TaskService.listOrSearchTasks(req.tenantId, {
+      query,
+      boardId,
+      limit,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: tasks,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/v1/tasks/:taskId - View task details
 router.get('/:taskId', validateUuidParam('taskId'), async (req, res, next) => {
   try {

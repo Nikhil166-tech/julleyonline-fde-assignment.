@@ -542,4 +542,49 @@ export class TaskService {
       };
     });
   }
+
+  /**
+   * Search or list tasks in the active tenant workspace
+   */
+  static async listOrSearchTasks(tenantId, { query = null, boardId = null, limit = 20 } = {}) {
+    const where = { tenantId };
+
+    if (boardId) {
+      where.boardId = boardId;
+    }
+
+    if (query && typeof query === 'string' && query.trim()) {
+      const q = query.trim();
+      const orConditions = [
+        { title: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+      ];
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) {
+        orConditions.push({ id: q });
+      }
+      where.OR = orConditions;
+    }
+
+    const tasks = await prisma.task.findMany({
+      where,
+      take: Math.min(Math.max(limit, 1), 50),
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        column: {
+          select: { id: true, name: true },
+        },
+        board: {
+          select: { id: true, name: true },
+        },
+        creator: {
+          select: { id: true, name: true, email: true, avatarUrl: true },
+        },
+        assignee: {
+          select: { id: true, name: true, email: true, avatarUrl: true },
+        },
+      },
+    });
+
+    return tasks;
+  }
 }

@@ -46,6 +46,7 @@ export function DashboardPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const urlBoardId = searchParams.get('boardId');
+  const urlTaskId = searchParams.get('taskId');
   const [boards, setBoards] = useState([]);
   const [currentBoardId, setCurrentBoardId] = useState(urlBoardId || null);
   const [board, setBoard] = useState(null);
@@ -177,6 +178,19 @@ export function DashboardPage() {
       setCurrentBoardId(urlBoardId);
     }
   }, [urlBoardId, boards]);
+
+  // Automatically open task details drawer if taskId is specified in URL query
+  useEffect(() => {
+    if (urlTaskId && board?.columns) {
+      for (const col of board.columns) {
+        const found = col.tasks?.find((t) => t.id === urlTaskId);
+        if (found) {
+          setSelectedTask(found);
+          break;
+        }
+      }
+    }
+  }, [urlTaskId, board]);
 
   // Context & Concurrency tracking refs
   const currentBoardIdRef = useRef(currentBoardId);
@@ -1161,7 +1175,14 @@ export function DashboardPage() {
       {selectedTask && (
         <TaskDetailsDrawer
           task={selectedTask}
-          onClose={() => setSelectedTask(null)}
+          onClose={() => {
+            setSelectedTask(null);
+            if (searchParams.get('taskId')) {
+              const next = new URLSearchParams(searchParams);
+              next.delete('taskId');
+              setSearchParams(next, { replace: true });
+            }
+          }}
           onTaskUpdated={handleTaskUpdated}
           onTaskDeleted={handleTaskDeleted}
           onConflict={(details) => setConflictDetails(details)}

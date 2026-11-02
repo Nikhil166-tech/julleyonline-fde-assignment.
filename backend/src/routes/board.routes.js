@@ -32,10 +32,11 @@ function validateUuidParam(paramName) {
 router.use(authenticateToken);
 router.use(requireTenantContext);
 
-// GET /api/v1/boards - List all boards in the tenant
+// GET /api/v1/boards - List all boards in the tenant (supports optional ?q= or ?search=)
 router.get('/', async (req, res, next) => {
   try {
-    const boards = await BoardService.listBoards(req.tenantId);
+    const query = req.query.q || req.query.search || null;
+    const boards = await BoardService.listBoards(req.tenantId, query);
     res.status(200).json({
       success: true,
       data: boards,

@@ -4,11 +4,25 @@ import { ActivityService } from './activity.service.js';
 
 export class BoardService {
   /**
-   * List all boards in the active tenant workspace
+   * List all boards in the active tenant workspace, optionally filtered by query
    */
-  static async listBoards(tenantId) {
+  static async listBoards(tenantId, query = null) {
+    const where = { tenantId };
+
+    if (query && typeof query === 'string' && query.trim()) {
+      const q = query.trim();
+      const orConditions = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+      ];
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) {
+        orConditions.push({ id: q });
+      }
+      where.OR = orConditions;
+    }
+
     const boards = await prisma.board.findMany({
-      where: { tenantId },
+      where,
       include: {
         createdBy: {
           select: { id: true, name: true, email: true },
