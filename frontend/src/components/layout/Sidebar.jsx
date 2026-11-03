@@ -10,6 +10,7 @@ import {
   Building2,
   ChevronDown,
   Layers,
+  Bot,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Dropdown } from '../ui/Dropdown';
@@ -22,6 +23,7 @@ export function Sidebar({ isOpen = true, onClose }) {
     { label: 'Home', path: '/', icon: Home },
     { label: 'Boards', path: '/boards', icon: LayoutGrid },
     { label: 'Tasks', path: '/tasks', icon: CheckSquare },
+    { label: 'AI Assistant', path: '/ai-assistant', icon: Bot },
     { label: 'Members', path: '/members', icon: Users },
     { label: 'Activity', path: '/activity', icon: History },
     { label: 'Settings', path: '/settings', icon: Settings },

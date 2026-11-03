@@ -9,6 +9,7 @@ import tenantRoutes from './routes/tenant.routes.js';
 import boardRoutes from './routes/board.routes.js';
 import columnRoutes from './routes/column.routes.js';
 import taskRoutes from './routes/task.routes.js';
+import aiRoutes from './routes/ai.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 
 export function createApp(options = {}) {
@@ -31,6 +32,7 @@ export function createApp(options = {}) {
   app.use('/api/v1/boards', boardRoutes);
   app.use('/api/v1/columns', columnRoutes);
   app.use('/api/v1/tasks', taskRoutes);
+  app.use('/api/v1/ai', aiRoutes);
 
   // Optional custom test or feature routers (if provided)
   if (options.routes) {

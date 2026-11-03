@@ -9,6 +9,7 @@ import { BoardListPage } from '../features/boards/BoardListPage';
 import { MembersPage } from '../features/members/MembersPage';
 import { ActivityPage } from '../features/activities/ActivityPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
+import { AiAssistantPage } from '../features/ai/AiAssistantPage';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -49,6 +50,7 @@ export function AppRoutes() {
         <Route path="tasks" element={<DashboardPage />} />
         <Route path="members" element={<MembersPage />} />
         <Route path="activity" element={<ActivityPage />} />
+        <Route path="ai-assistant" element={<AiAssistantPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
 

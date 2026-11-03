@@ -30,6 +30,18 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().url('DATABASE_URL must be a valid PostgreSQL connection URL'),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters long'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  AI_ASSISTANT_ENABLED: z
+    .string()
+    .optional()
+    .default('true')
+    .transform((val) => val === 'true' || val === '1'),
+  AI_SERVICE_URL: z.string().url().optional().default('http://127.0.0.1:8000'),
+  AI_SERVICE_TOKEN: z.string().optional().default('dev-ai-service-token-secret'),
+  AI_REQUEST_TIMEOUT_MS: z
+    .string()
+    .optional()
+    .default('15000')
+    .transform((val) => parseInt(val, 10) || 15000),
 });
 
 export function validateConfig(customEnv = process.env) {
@@ -50,6 +62,10 @@ export function validateConfig(customEnv = process.env) {
     databaseUrl: data.DATABASE_URL,
     jwtSecret: data.JWT_SECRET,
     corsOrigin: data.CORS_ORIGIN,
+    aiAssistantEnabled: data.AI_ASSISTANT_ENABLED,
+    aiServiceUrl: data.AI_SERVICE_URL,
+    aiServiceToken: data.AI_SERVICE_TOKEN,
+    aiRequestTimeoutMs: data.AI_REQUEST_TIMEOUT_MS,
   };
 }
 
