@@ -1,7 +1,8 @@
 # JulleyOnline — Enterprise Multi-Tenant SaaS Kanban Platform
 
-[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-117%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
-[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-23%20Passed-blue.svg)](#test-suite-and-verification-evidence)
+[![Backend Tests](https://img.shields.io/badge/Backend%20Tests-128%20Passed-emerald.svg)](#test-suite-and-verification-evidence)
+[![Playwright E2E Tests](https://img.shields.io/badge/Playwright%20E2E-33%20Passed-blue.svg)](#test-suite-and-verification-evidence)
+[![Python AI Tests](https://img.shields.io/badge/Python%20AI%20Tests-32%20Passed-purple.svg)](#test-suite-and-verification-evidence)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Prisma-indigo.svg)](#architecture-overview)
 [![Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO%20%2B%20Presence-amber.svg)](#real-time-collaboration--presence)
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite%20%2B%20Tailwind-cyan.svg)](#frontend-architecture)
@@ -404,11 +405,16 @@ Comprehensive API specifications are documented in [`docs/api-documentation.md`]
 JulleyOnline includes an **optional, read-only AI Kanban Assistant** extension (documented in detail in [`docs/ai-assistant.md`](docs/ai-assistant.md)).
 
 ### Key Architectural Highlights
+- **Three-Tier Cascade Pipeline:**
+  1. *Tier 1 (Google Gemini):* Fast primary intelligence (`gemini-3.5-flash` / `gemini-3.8-flash`) with 3.5s fast-fail timeout.
+  2. *Tier 2 (Ollama Cloud):* Secondary cloud LLM (`gemma4:31b` via `https://ollama.com/api/chat`) with 4.5s fast-fail timeout for seamless failover during rate limits or service outages.
+  3. *Tier 3 (Local Deterministic Engine):* In-memory rule synthesizer executing without external network calls when offline or if all LLMs fail.
+- **Accurate Aggregations Beyond 100 Tasks:** PostgreSQL database-level aggregations (`prisma.task.count` and `groupBy`) compute exact workspace metrics across all matching tasks while keeping the LLM prompt payload bounded to 100 recent tasks and 30 audit activities.
 - **Strict Gateway & Zero Direct DB Access:** The Python microservice has no database credentials or direct database access. The Node.js Express backend serves as the sole gateway, enforcing authentication, tenant membership checks, and context sanitization.
+- **Constant-Time Token Auth & Loopback Hardening:** Microservice binds to `127.0.0.1:8000` by default, compares service tokens with `hmac.compare_digest` to eliminate timing side channels, and enforces strong non-default secrets in production.
 - **Data Minimization:** Sensitive credentials, passwords, and emails are stripped before data reaches the AI service.
 - **4 Allowlisted Read-Only Tools:** `get_tasks`, `get_overdue_tasks`, `get_activity_logs`, and `get_board_summary`.
 - **Tenant-Switching Race Protection:** Changing workspaces in the UI immediately aborts in-flight AI requests via `AbortController`, increments request sequencing counters, and resets chat history.
-- **Gemini 3.5 / 3.8 + Deterministic Fallback:** Supports Gemini 3.5 Flash and 3.8 Flash with automatic fallback to an in-memory deterministic analyzer for testing without API keys.
 - **Typed Enterprise Widgets & Intent Guardrails:** Answers are categorized into explicit response types (`overdue_summary`, `board_summary`, `task_list`, `activity_summary`, `scope_notice`, `security_notice`) with clean Markdown rendering and expandable tool disclosures.
 
 ### Quick Start for AI Service
@@ -418,7 +424,7 @@ cd ai-service
 py -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --port 8000 --reload
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ---

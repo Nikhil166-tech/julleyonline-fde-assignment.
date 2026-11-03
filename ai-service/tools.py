@@ -46,6 +46,7 @@ def get_tasks(
         "total_matched": len(filtered),
         "total_in_workspace": context.metrics.totalTasks,
         "is_truncated": context.isTruncated,
+        "sampled_records": len(tasks),
         "tasks": filtered
     }
 
@@ -111,15 +112,24 @@ def get_overdue_tasks(
     priority_weights = {"URGENT": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
     overdue.sort(key=lambda x: (priority_weights.get(x["priority"], 0), x["daysPastDue"]), reverse=True)
 
+    # If this query covers the primary context scope, use authoritative aggregates from context.metrics
+    is_primary_scope = (not board_id or board_id == context.boardId)
+    auth_total = context.metrics.totalTasks if is_primary_scope else total_in_scope
+    auth_overdue = context.metrics.overdueTasks if is_primary_scope else len(overdue)
+    metric_with_due = getattr(context.metrics, "tasksWithDueDates", 0) or 0
+    auth_with_due = metric_with_due if (is_primary_scope and metric_with_due > 0) else with_due_dates
+
     return {
         "tool": "get_overdue_tasks",
         "reference_time": current_time_str,
-        "total_tasks_in_scope": total_in_scope,
-        "tasks_with_due_dates": with_due_dates,
-        "tasks_without_due_dates": max(0, total_in_scope - with_due_dates),
+        "total_tasks_in_scope": auth_total,
+        "tasks_with_due_dates": auth_with_due,
+        "tasks_without_due_dates": max(0, auth_total - auth_with_due),
         "on_schedule_count": on_schedule,
-        "overdue_count": len(overdue),
+        "overdue_count": auth_overdue,
         "completed_past_due_count": len(completed_past_due),
+        "is_truncated": context.isTruncated,
+        "sampled_records": len(context.tasks),
         "tasks": overdue
     }
 
@@ -226,5 +236,8 @@ def get_board_summary(
         "completion_percentage": completion_pct,
         "by_column": m.byColumn,
         "by_priority": m.byPriority,
-        "is_truncated": context.isTruncated
+        "is_truncated": context.isTruncated,
+        "sampled_records": m.sampledTasks,
+        "completion_inference_policy": getattr(m, "completionInferencePolicy", None),
+        "is_inferred_completion": getattr(m, "isInferredCompletion", True)
     }

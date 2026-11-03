@@ -396,3 +396,85 @@ All board mutation events are broadcast **strictly after the PostgreSQL transact
 3. **Authoritative Snapshot Reconciliation:** On structural board changes (column move, task move across columns) and socket reconnections, the client triggers `fetchBoardSnapshot(currentBoardId)` (`GET /api/v1/boards/:boardId`) to ensure sibling card positions and metadata are completely synchronized with PostgreSQL.
 4. **Optimistic Updates & HTTP 409 Rollback:** Frontend applies optimistic UI adjustments immediately. If the server rejects the request with HTTP 409 Conflict, the client displays a conflict notification modal and refreshes to the latest authoritative database state.
 5. **Reconnection Synchronization:** Upon network recovery, the client automatically re-authenticates, re-emits `join:tenant` and `join:board`, and triggers `onReconnectResync` to reload authoritative board data without manual refresh.
+
+---
+
+## 9. AI Kanban Assistant Endpoints
+
+The AI Assistant provides read-only natural language analysis of Kanban boards and workspace metrics, processed via a three-tier execution cascade (Gemini $\to$ Ollama Cloud $\to$ Local Engine).
+
+### `POST /api/v1/ai/chat`
+- **Description:** Queries the AI Kanban Assistant with a natural language question scoped to the authorized tenant workspace and optional board filter.
+- **Headers:**
+  - `Authorization: Bearer <jwt_token>` (Required)
+  - `X-Tenant-ID: <uuid>` (Required — Tenant workspace boundary)
+  - `Content-Type: application/json`
+- **Request Body:**
+  ```json
+  {
+    "query": "Show all overdue tasks across the workspace",
+    "boardId": "3b29c91d-9e67-4eb4-bca5-b38fae1f762a"
+  }
+  ```
+  *(Note: `boardId` is optional; when omitted, scope defaults to the entire active tenant workspace).*
+- **Response `200 OK`:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "answer": "There are currently 2 overdue tasks in the selected board...",
+      "responseType": "overdue_summary",
+      "data": {
+        "overdueCount": 2,
+        "tasksAnalyzed": 45,
+        "tasksWithDueDates": 20,
+        "tasksWithoutDueDates": 25,
+        "tasks": [
+          {
+            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "title": "Database index optimization",
+            "priority": "HIGH",
+            "columnName": "In Progress",
+            "dueDate": "2026-10-28T00:00:00.000Z",
+            "daysOverdue": 6
+          }
+        ]
+      },
+      "metrics": {
+        "totalTasks": 45,
+        "completedTasks": 15,
+        "pendingTasks": 30,
+        "overdueTasks": 2,
+        "unassignedTasks": 5,
+        "tasksWithDueDates": 20,
+        "completionInferencePolicy": "explicit_done_column_or_normalized_done_status",
+        "isInferredCompletion": true,
+        "byColumn": { "Backlog": 12, "In Progress": 18, "Done": 15 },
+        "byPriority": { "LOW": 5, "MEDIUM": 25, "HIGH": 12, "URGENT": 3 }
+      },
+      "toolExecution": {
+        "toolsCalled": ["get_overdue_tasks"],
+        "recordsAnalyzed": 45,
+        "scope": "Frontend App Board"
+      },
+      "generation": {
+        "source": "llm",
+        "provider": "gemini",
+        "tier": 1,
+        "model": "gemini-3.5-flash",
+        "fallbackUsed": false
+      }
+    }
+  }
+  ```
+- **Three-Tier Metadata Contract (`generation`):**
+  - Tier 1 (Gemini): `{ source: "llm", provider: "gemini", tier: 1, model: "gemini-3.5-flash", fallbackUsed: false }`
+  - Tier 2 (Ollama Cloud): `{ source: "llm", provider: "ollama", tier: 2, model: "gemma4:31b (ollama)", fallbackUsed: true, failureReason: "gemini_unavailable" }`
+  - Tier 3 (Local Deterministic Engine): `{ source: "local", provider: "local", tier: 3, model: "deterministic-v1", fallbackUsed: true, failureReason: "..." }`
+  - Intent Guardrail Notice: `{ source: "guardrail", provider: null, tier: null, model: null, fallbackUsed: false }`
+- **Error Responses:**
+  - `400 Bad Request`: Validation failure (empty query, query > 1000 characters, invalid `boardId` UUID).
+  - `401 Unauthorized`: Missing, expired, or invalid JWT Bearer token.
+  - `403 Forbidden`: `boardId` belongs to a different tenant workspace, or user lacks membership in `X-Tenant-ID`.
+  - `502 Bad Gateway`: AI microservice is offline, returned an unparseable response, or external LLM providers failed when in `AI_RESPONSE_MODE=llm`. Client receives sanitized message without stack traces.
+  - `504 Gateway Timeout`: AI microservice exceeded the 15,000ms timeout threshold.

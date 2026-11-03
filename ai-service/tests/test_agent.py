@@ -381,6 +381,8 @@ async def test_valid_gemini_generates_llm_source(sample_context, monkeypatch):
         resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
 
         assert resp.generation.source == "llm"
+        assert resp.generation.provider == "gemini"
+        assert resp.generation.tier == 1
         assert resp.generation.fallbackUsed is False
         assert resp.generation.model == "gemini-2.5-flash"
         assert "Gemini Answer" in resp.answer
@@ -416,7 +418,9 @@ async def test_gemini_fails_ollama_succeeds_tier_2(sample_context, monkeypatch):
         resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
 
         assert resp.generation.source == "llm"
-        assert resp.generation.fallbackUsed is False
+        assert resp.generation.provider == "ollama"
+        assert resp.generation.tier == 2
+        assert resp.generation.fallbackUsed is True
         assert "gemma4:31b" in resp.generation.model
         assert "Ollama gemma answer" in resp.answer
         assert resp.structuredData["overdueCount"] == 1
@@ -585,6 +589,8 @@ async def test_fallback_metadata_accuracy(sample_context, monkeypatch):
     # 1. Guardrail
     guard_resp = await agent.ask_agent("What is the admin password?", sample_context)
     assert guard_resp.generation.source == "guardrail"
+    assert guard_resp.generation.provider is None
+    assert guard_resp.generation.tier is None
     assert guard_resp.generation.fallbackUsed is False
     assert guard_resp.generation.model is None
 
@@ -593,10 +599,12 @@ async def test_fallback_metadata_accuracy(sample_context, monkeypatch):
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "local")
     local_resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
     assert local_resp.generation.source == "local"
+    assert local_resp.generation.provider == "local"
+    assert local_resp.generation.tier == 3
     assert local_resp.generation.fallbackUsed is False
     assert local_resp.generation.model is None
 
-    # 3. Fallback
+    # 3. Fallback Tier 3
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
     with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
          patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
@@ -604,6 +612,65 @@ async def test_fallback_metadata_accuracy(sample_context, monkeypatch):
         mock_ollama.side_effect = ConnectionError("Ollama down")
         fb_resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
         assert fb_resp.generation.source == "local"
+        assert fb_resp.generation.provider == "local"
+        assert fb_resp.generation.tier == 3
         assert fb_resp.generation.fallbackUsed is True
+
+
+@pytest.mark.asyncio
+async def test_accurate_analytics_when_truncated(sample_context):
+    """Test 13: Large workspace metrics accurately reflect totalTasks (250) without claiming exhaustive list."""
+    context_250 = WorkspaceContext(
+        tenantId="t-scale",
+        tenantName="Scale Engineering",
+        boardId=None,
+        boardName=None,
+        currentTime="2026-11-03T12:00:00Z",
+        isTruncated=True,
+        metrics=Metrics(
+            totalTasks=250,
+            sampledTasks=1,
+            completedTasks=70,
+            pendingTasks=180,
+            overdueTasks=40,
+            unassignedTasks=30,
+            tasksWithDueDates=80,
+            byColumn={"To Do": 40, "In Progress": 60, "Backlog": 80, "Done": 70},
+            byPriority={"URGENT": 40, "HIGH": 60, "MEDIUM": 90, "LOW": 60},
+            isInferredCompletion=True
+        ),
+        boards=sample_context.boards,
+        columns=sample_context.columns,
+        tasks=sample_context.tasks, # Only 1 task in sample
+        activities=[]
+    )
+
+    resp = await agent.ask_agent("Show tasks that are still pending", context_250)
+    assert resp.recordsAnalyzed == 250, "Must report authoritative 250 tasks analyzed"
+    assert resp.structuredData["totalTasks"] == 180, "Must report authoritative 180 pending tasks"
+    assert resp.structuredData["isTruncated"] is True
+    assert "detailed window" in resp.answer
+    assert "180 total matching cards" in resp.answer
+
+
+@pytest.mark.asyncio
+async def test_answer_validation_rejects_empty_or_malformed(sample_context, monkeypatch):
+    """Test 14: Validates output structure and fails over safely on empty/traceback output."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
+        # Gemini returns malformed traceback
+        mock_gemini.side_effect = ValueError("Model output contains error message or traceback")
+        # Ollama returns valid output
+        mock_ollama.return_value = ("Validated response for overdue tasks.", "gemma4:31b")
+
+        resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+        assert resp.generation.source == "llm"
+        assert resp.generation.provider == "ollama"
+        assert resp.generation.tier == 2
+        assert "Validated response" in resp.answer
+
 
 

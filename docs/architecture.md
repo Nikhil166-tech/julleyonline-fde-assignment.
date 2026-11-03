@@ -432,3 +432,30 @@ Every mutation broadcasts only **after** the PostgreSQL transaction successfully
 - **Conflict Modal**: Frontend displays latest server state side-by-side with user's stale edits, allowing one-click reconciliation to authoritative state.
 - **Undo / Redo Safety**: Undo and Redo operations execute authorized reversal mutations passing the task's current monotonic version. If a collaborator updated the task in the meantime, the server rejects the undo with HTTP 409 Conflict, alerting the user and preserving collaborator work.
 - **Reconnection Recovery**: Upon reconnection, client re-authenticates, rejoins the board room, and triggers an authoritative snapshot fetch (`GET /api/v1/boards/:id`) to reconcile missed events.
+
+---
+
+# 13. AI Kanban Assistant Service Boundary & Architecture
+
+## 13.1 Service Isolation & Zero Database Access
+The AI Assistant operates as an optional microservice written in Python/FastAPI (`ai-service/`).
+- **Network Boundary**: Binds to loopback `127.0.0.1:8000` by default; open wildcard CORS is strictly disabled.
+- **Service Token Authentication**: Calls from Express to FastAPI pass `X-Service-Token: <token>`. FastAPI validates this header using constant-time comparison (`hmac.compare_digest`) to protect against timing side-channel attacks. Production configurations enforce strong non-default secrets via Zod `.superRefine`.
+- **Zero Database Access**: The Python service holds no PostgreSQL credentials, connection strings, or ORM clients. It is purely an in-memory computational engine processing JSON context forwarded by Express.
+
+## 13.2 Accurate Workspace Aggregations Beyond 100 Tasks
+To prevent sampling distortions (e.g. in workspaces with hundreds or thousands of tasks):
+- **Database Aggregations in PostgreSQL**: `ai-context.service.js` executes dedicated SQL aggregations (`prisma.task.count` and `groupBy`) scoped strictly by `tenantId` (and optional `boardId`). It computes exact total tasks, overdue counts, unassigned counts, column stage counts, and priority distributions across all authorized records.
+- **Bounded Context**: Detailed task cards forwarded to LLM APIs remain capped at 100 recent tasks and 30 audit logs to guarantee low latency, bounded memory usage, and cost efficiency.
+- **Honest Truncation Representation**: Tools (`tools.py`) and response synthesizer explicitly inform users when card details represent a sample of a larger workspace dataset (e.g., *"Showing 100 of 250 tasks"*).
+
+## 13.3 Three-Tier Cascade Architecture
+1. **Tier 1 (Google Gemini)**: Primary external LLM (`gemini-3.5-flash` / `gemini-3.8-flash`) with strict 3.5s fast-fail timeout.
+2. **Tier 2 (Ollama Cloud)**: Secondary cloud LLM (`gemma4:31b` via `https://ollama.com/api/chat`) with strict 4.5s fast-fail timeout, invoked automatically if Gemini encounters 429 quota exhaustion, 503 service unavailable, or timeouts.
+3. **Tier 3 (Local Deterministic Engine)**: In-memory Python rule engine executing without network calls, invoked when external providers fail or when `AI_RESPONSE_MODE=local`.
+- **Response Validation**: `validate_model_output` rejects empty, whitespace, tracebacks, or corrupted model outputs before they reach the user.
+
+## 13.4 Strict Multi-Tenant Isolation & Error Sanitization
+- Express validates `req.tenantId` and confirms `boardId` belongs to the tenant before extracting context.
+- Sensitive credentials, passwords, and emails are stripped before forwarding.
+- Upstream and internal errors are sanitized at the Express gateway, preventing traceback or configuration leaks to frontend users.

@@ -510,7 +510,7 @@ export function AiAssistantPage() {
           recordsAnalyzed: res.data.recordsAnalyzed,
           dataScope: res.data.dataScope || activeTenant?.name || 'Workspace',
           confidence: res.data.confidence || 'high',
-          generation: res.data.generation || { source: 'local', model: null, fallbackUsed: false },
+          generation: res.data.generation || { source: 'local', provider: 'local', model: null, fallbackUsed: false, tier: 3 },
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, aiMsg]);
@@ -680,7 +680,11 @@ export function AiAssistantPage() {
                           className="flex items-center gap-1.5 text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-md mb-1 w-fit"
                         >
                           <Info className="w-3.5 h-3.5 shrink-0" />
-                          <span>Answered using local workspace analysis.</span>
+                          <span>
+                            {msg.generation.provider === 'ollama'
+                              ? 'Answered using secondary cloud model (Ollama).'
+                              : 'Answered using local workspace analysis.'}
+                          </span>
                         </div>
                       )}
 
@@ -718,13 +722,15 @@ export function AiAssistantPage() {
                             <div className="flex items-center gap-1.5" data-testid="ai-generation-source">
                               <span className="text-slate-400">Generation Source:</span>
                               <span className="font-medium text-slate-300">
-                                {msg.generation.source === 'llm'
-                                  ? `Gemini (${msg.generation.model || 'gemini-2.5-flash'})`
+                                {msg.generation.source === 'guardrail'
+                                  ? 'Security/scope guardrail'
+                                  : msg.generation.provider === 'gemini'
+                                  ? `Google Gemini — ${msg.generation.model || 'gemini-3.5-flash'}`
+                                  : msg.generation.provider === 'ollama'
+                                  ? `Ollama Cloud — ${msg.generation.model || 'gemma4:31b'}`
                                   : msg.generation.fallbackUsed
-                                  ? `Local Deterministic Fallback`
-                                  : msg.generation.source === 'guardrail'
-                                  ? 'Security Guardrail'
-                                  : 'Local Deterministic Engine'}
+                                  ? 'Local workspace analysis (fallback)'
+                                  : 'Local workspace analysis'}
                               </span>
                             </div>
                           )}

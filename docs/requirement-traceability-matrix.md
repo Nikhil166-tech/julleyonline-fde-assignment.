@@ -35,13 +35,19 @@
 | **REQ-UND-01** | Client-side Undo/Redo history stack with OCC validation safeguards | `frontend/src/context/UndoRedoContext.jsx`, `DashboardPage.jsx` | `Ctrl+Z`, `Ctrl+Y`, Undo/Redo buttons | `phase4-collab.spec.js`: `COL-05`, `COL-07` | Preserves recorded action version; rejects stale undo if collaborator updated task | **VERIFIED** |
 | **REQ-ERD-01** | Database ER Diagram & Architecture Specification | `backend/prisma/schema.prisma`, `docs/er-diagram.md` | Authoritative 8-entity Mermaid ER diagram & spec | Verified in `docs/er-diagram.md` and schema tests | 8 tables, indexes, cascading rules, OCC versioning specified | **VERIFIED** |
 | **REQ-ENV-01** | Strict test database isolation and safe teardown | `backend/.env.test`, `backend/scripts/test-db-guard.js`, `backend/scripts/reset-test-db.js`, `playwright.config.js` | Dedicated port 5001, test DB `julleyonline_kanban_test` | `frontend/tests/board-selector.spec.js`, `backend/tests/phase1a.test.js: TC-SAF-01` | Tests execute strictly against test DB; dev DB protected | **VERIFIED** |
+| **REQ-AI-01** | Three-tier AI response pipeline (Gemini $\to$ Ollama Cloud $\to$ Local Engine) with explicit provenance metadata | `ai-service/agent.py`, `backend/src/services/ai.service.js` | `POST /api/v1/ai/chat`, `AiAssistantPage.jsx` | `ai-service/tests/test_agent.py` (Tests 1–12), `backend/tests/ai.test.js: TC-AI-11`, `ai-assistant.spec.js: AI-08–AI-10` | Full 3-tier cascade verified: `tier: 1/2/3`, `provider: gemini/ollama/local`, automatic fallback | **VERIFIED** |
+| **REQ-AI-02** | Accurate workspace aggregations beyond 100 tasks via PostgreSQL database queries & bounded context | `backend/src/services/ai-context.service.js`, `ai-service/tools.py` | `POST /api/v1/ai/chat` | `backend/tests/ai.test.js: TC-AI-10` (250-task scale test), `test_agent.py` (Test 13) | `groupBy` and `count` aggregate 250 tasks accurately; LLM context bounded to 100 tasks | **VERIFIED** |
+| **REQ-AI-03** | Express Gateway & internal FastAPI microservice hardening | `backend/src/config/env.js`, `ai-service/main.py`, `ai-service/config.py` | Loopback `127.0.0.1:8000`, `X-Service-Token` | `backend/tests/ai.test.js: TC-AI-01–04`, `test_security.py` | `hmac.compare_digest` constant-time token check, no wildcard CORS, sanitized error messages | **VERIFIED** |
+| **REQ-AI-04** | Intent gating guardrails & 4 allowlisted read-only tools | `ai-service/agent.py`, `ai-service/tools.py` | `POST /api/v1/ai/chat` | `test_agent.py: Cases A-D`, `backend/tests/ai.test.js: TC-AI-04` | Password and cross-org queries pre-empted; 4 read-only tools strictly tenant-scoped | **VERIFIED** |
+| **REQ-AI-05** | Enterprise AI Assistant UX: typed widgets, safe markdown & subtle fallback indication | `frontend/src/features/ai/AiAssistantPage.jsx` | `/ai-assistant` UI, board scope selector | `frontend/tests/ai-assistant.spec.js: AI-01–AI-10` | Clean typography, no raw markdown leaks, informative fallback banner without raw errors | **VERIFIED** |
 
 ---
 
 ## 2. Test Execution Summary
 
-- **Total Backend Automated Tests:** 117 Passed (0 Failed, 0 Skipped) across 5 test suites (Phase 1A: 9, Phase 1B: 29, Phase 2A: 28, Phase 2B: 40, Phase 4: 11).
-- **Total Frontend Playwright Automated Functional Tests:** 23 Passed (0 Failed, 0 Skipped) across 3 test suites (`board-selector.spec.js`: 7, `e2e.spec.js`: 7, `phase4-collab.spec.js`: 9).
+- **Total Backend Automated Tests:** 128 Passed (0 Failed, 0 Skipped) across 6 test suites (Phase 1A: 9, Phase 1B: 29, Phase 2A: 28, Phase 2B: 40, Phase 4: 11, AI Gateway: 11).
+- **Total Python AI Service Tests:** 32 Passed (0 Failed, 0 Skipped) across 3 test suites (`test_agent.py`: 25, `test_security.py`: 3, `test_tools.py`: 4).
+- **Total Frontend Playwright Automated Functional Tests:** 33 Passed (0 Failed, 0 Skipped) across 4 test suites (`board-selector.spec.js`: 7, `e2e.spec.js`: 7, `phase4-collab.spec.js`: 9, `ai-assistant.spec.js`: 10).
 - **Total Screenshot Capture Specs:** 2 Passed (9 high-fidelity screenshots in `docs/`).
-- **Combined Automated Test Count:** **140 Automated Tests** Passing with 100% Deterministic Execution Evidence.
+- **Combined Automated Test Count:** **193 Automated Tests** Passing with 100% Deterministic Execution Evidence.
 - **Baseline Development Database:** Exactly 4 boards preserved in `julleyonline_kanban`. Zero test pollution.

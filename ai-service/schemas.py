@@ -41,8 +41,11 @@ class Metrics(BaseModel):
     pendingTasks: int
     overdueTasks: int
     unassignedTasks: int
+    tasksWithDueDates: Optional[int] = 0
     byColumn: Dict[str, int] = Field(default_factory=dict)
     byPriority: Dict[str, int] = Field(default_factory=dict)
+    completionInferencePolicy: Optional[str] = None
+    isInferredCompletion: bool = True
 
 class WorkspaceContext(BaseModel):
     tenantId: str
@@ -63,8 +66,10 @@ class ChatRequest(BaseModel):
 
 class GenerationMeta(BaseModel):
     source: str = "local"  # "llm", "local", "guardrail"
+    provider: Optional[str] = "local"  # "gemini", "ollama", "local", None
     model: Optional[str] = None
     fallbackUsed: bool = False
+    tier: Optional[int] = 3  # 1 (Gemini), 2 (Ollama), 3 (Local), None (Guardrail)
     failureReason: Optional[str] = None
 
 class ChatResponse(BaseModel):

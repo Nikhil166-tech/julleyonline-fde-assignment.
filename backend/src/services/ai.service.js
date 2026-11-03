@@ -40,8 +40,11 @@ export class AiService {
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const errorDetail = data?.error?.message || data?.detail || `HTTP ${response.status} from AI microservice`;
-        throw new AppError(`AI Service Error: ${errorDetail}`, response.status >= 500 ? 502 : response.status, 'AI_SERVICE_ERROR');
+        const status = response.status >= 500 ? 502 : response.status;
+        const sanitizedMsg = status === 502
+          ? 'AI Assistant service is temporarily unable to process this request. Please try again shortly.'
+          : (data?.detail || 'Invalid request to AI Assistant service.');
+        throw new AppError(sanitizedMsg, status, 'AI_SERVICE_ERROR');
       }
 
       return {
@@ -53,7 +56,13 @@ export class AiService {
         generatedAt: data.generatedAt || new Date().toISOString(),
         recordsAnalyzed: data.recordsAnalyzed ?? null,
         dataScope: data.dataScope || null,
-        generation: data.generation || { source: 'local', model: null, fallbackUsed: false },
+        generation: data.generation || {
+          source: 'local',
+          provider: 'local',
+          model: null,
+          fallbackUsed: false,
+          tier: 3,
+        },
       };
     } catch (err) {
       clearTimeout(timeout);

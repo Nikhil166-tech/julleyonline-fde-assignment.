@@ -50,7 +50,7 @@ def check_intent_guardrails(message: str, context: WorkspaceContext) -> Optional
             dataScope=context.tenantName,
             confidence="high",
             generatedAt=datetime.now(timezone.utc).isoformat(),
-            generation=GenerationMeta(source="guardrail", model=None, fallbackUsed=False)
+            generation=GenerationMeta(source="guardrail", provider=None, model=None, fallbackUsed=False, tier=None)
         )
 
     # Guardrail 2: Cross-Organization / Out-of-Scope Isolation (Case B)
@@ -71,7 +71,7 @@ def check_intent_guardrails(message: str, context: WorkspaceContext) -> Optional
             dataScope=context.tenantName,
             confidence="high",
             generatedAt=datetime.now(timezone.utc).isoformat(),
-            generation=GenerationMeta(source="guardrail", model=None, fallbackUsed=False)
+            generation=GenerationMeta(source="guardrail", provider=None, model=None, fallbackUsed=False, tier=None)
         )
 
     return None
@@ -155,17 +155,20 @@ def synthesize_deterministic_response(
     if response_type == "overdue_summary":
         overdue_data = tool_results.get("overdue") or tools.get_overdue_tasks(context, context.boardId)
         tasks = overdue_data.get("tasks", [])
-        total_in_scope = overdue_data.get("total_tasks_in_scope", len(context.tasks))
+        total_in_scope = overdue_data.get("total_tasks_in_scope", context.metrics.totalTasks)
+        overdue_count = overdue_data.get("overdue_count", len(tasks))
         with_due_dates = overdue_data.get("tasks_with_due_dates", 0)
         without_due_dates = overdue_data.get("tasks_without_due_dates", max(0, total_in_scope - with_due_dates))
 
         structured_data = {
             "tasksAnalyzed": total_in_scope,
-            "overdueCount": len(tasks),
+            "overdueCount": overdue_count,
             "tasksWithDueDates": with_due_dates,
             "tasksWithoutDueDates": without_due_dates,
             "tasks": tasks,
-            "hasDueDates": with_due_dates > 0
+            "hasDueDates": with_due_dates > 0,
+            "isTruncated": context.isTruncated,
+            "sampledRecords": len(context.tasks)
         }
 
         # Case A: No tasks have due dates configured
@@ -178,15 +181,16 @@ def synthesize_deterministic_response(
             return answer, structured_data, total_in_scope
 
         # Case D: Tasks with due dates exist
-        if not tasks:
+        if overdue_count == 0:
             answer = (
                 f"Analyzed **{total_in_scope} task(s)** in **{board_name}** ({with_due_dates} with due dates). "
                 f"There are currently **0 overdue tasks**. All scheduled cards are on track or completed."
             )
             return answer, structured_data, total_in_scope
 
+        sample_note = f" (showing top {len(tasks)} in active detailed sample)" if context.isTruncated and len(tasks) < overdue_count else ""
         lines = [
-            f"Found **{len(tasks)} overdue task(s)** in **{board_name}** ({total_in_scope} total tasks analyzed, {with_due_dates} with due dates):\n"
+            f"Found **{overdue_count} overdue task(s)** in **{board_name}** ({total_in_scope} total tasks analyzed across workspace, {with_due_dates} with due dates){sample_note}:\n"
         ]
         for t in tasks:
             lines.append(
@@ -217,9 +221,9 @@ def synthesize_deterministic_response(
     # 3. Board Summary
     if response_type == "board_summary":
         summary = tool_results.get("summary") or tools.get_board_summary(context, context.boardId)
-        total = summary.get("total_tasks", len(context.tasks))
-        comp = summary.get("completed_tasks", 0)
-        pending = summary.get("pending_tasks", 0)
+        total = summary.get("total_tasks", context.metrics.totalTasks)
+        comp = summary.get("completed_tasks", context.metrics.completedTasks)
+        pending = summary.get("pending_tasks", context.metrics.pendingTasks)
         pct = summary.get("completion_percentage", 0.0)
 
         structured_data = summary
@@ -229,8 +233,8 @@ def synthesize_deterministic_response(
             f"- **Total Tasks:** {total}",
             f"- **Completed:** {comp} ({pct}%)",
             f"- **Pending:** {pending}",
-            f"- **Overdue:** {summary.get('overdue_tasks', 0)}",
-            f"- **Unassigned:** {summary.get('unassigned_tasks', 0)}\n",
+            f"- **Overdue:** {summary.get('overdue_tasks', context.metrics.overdueTasks)}",
+            f"- **Unassigned:** {summary.get('unassigned_tasks', context.metrics.unassignedTasks)}\n",
             "**Column Distribution:**"
         ]
         for col, count in summary.get("by_column", {}).items():
@@ -247,12 +251,15 @@ def synthesize_deterministic_response(
         if "completed" in msg or "work completed" in msg:
             filtered = [t for t in context.tasks if tools.is_completed_column(t.columnName)]
             title_prefix = "Completed Work"
+            total_matching_metric = context.metrics.completedTasks
         elif "urgent" in msg or "priority" in msg:
             filtered = [t for t in context.tasks if t.priority in ["URGENT", "HIGH"] and not tools.is_completed_column(t.columnName)]
             title_prefix = "Urgent & High-Priority Tasks"
+            total_matching_metric = (context.metrics.byPriority.get("URGENT", 0) + context.metrics.byPriority.get("HIGH", 0))
         else:
             filtered = [t for t in context.tasks if not tools.is_completed_column(t.columnName)]
             title_prefix = "Pending Tasks"
+            total_matching_metric = context.metrics.pendingTasks
 
         structured_tasks = [
             {
@@ -267,16 +274,23 @@ def synthesize_deterministic_response(
         ]
 
         structured_data = {
-            "totalTasks": len(filtered),
+            "totalTasks": total_matching_metric if context.isTruncated else len(filtered),
+            "sampledMatches": len(filtered),
             "tasks": structured_tasks,
-            "filterType": title_prefix
+            "filterType": title_prefix,
+            "isTruncated": context.isTruncated,
+            "totalAnalyzed": context.metrics.totalTasks
         }
 
         if not filtered:
             answer = f"There are currently 0 tasks matching **{title_prefix}** in **{workspace_name}**."
-            return answer, structured_data, 0
+            return answer, structured_data, context.metrics.totalTasks
 
-        lines = [f"Found **{len(filtered)} {title_prefix.lower()}** in **{board_name}**:\n"]
+        if context.isTruncated:
+            lines = [f"Found **{len(filtered)} {title_prefix.lower()}** in detailed window (out of **{total_matching_metric} total matching cards** across **{board_name}**):\n"]
+        else:
+            lines = [f"Found **{len(filtered)} {title_prefix.lower()}** in **{board_name}**:\n"]
+
         for t in structured_tasks:
             due_str = f" | Due: {t['dueDate']}" if t['dueDate'] else ""
             lines.append(f"- **[{t['priority']}] {t['title']}** — Column: `{t['column']}` | Assignee: `{t['assignee']}`{due_str}")
@@ -284,13 +298,28 @@ def synthesize_deterministic_response(
         if len(filtered) > 15:
             lines.append(f"\n*...and {len(filtered) - 15} additional task(s).*")
 
-        return "\n".join(lines), structured_data, len(filtered)
+        return "\n".join(lines), structured_data, context.metrics.totalTasks
 
     # 5. General Answer Fallback
     summary = tool_results.get("summary") or tools.get_board_summary(context, context.boardId)
     total = summary.get("total_tasks", len(context.tasks))
     answer = f"The active workspace **{workspace_name}** contains **{total} task(s)** across **{len(context.columns)} column(s)**."
     return answer, summary, total
+
+def validate_model_output(text: Optional[str]) -> str:
+    """
+    Validates model output to reject empty, malformed, or hallucinated error payloads.
+    Raises ValueError if validation fails, causing safe failover to the next tier.
+    """
+    if not text or not isinstance(text, str):
+        raise ValueError("Model output is empty or non-string")
+    cleaned = text.strip()
+    if len(cleaned) < 5:
+        raise ValueError("Model output is too short to be a valid response")
+    lower = cleaned.lower()
+    if lower.startswith("error:") or lower.startswith("traceback (most recent"):
+        raise ValueError("Model output contains error message or traceback")
+    return cleaned
 
 async def call_gemini(
     message: str,
@@ -341,8 +370,9 @@ Please answer the user question directly, concisely, and professionally in clean
 
             response = await asyncio.wait_for(asyncio.to_thread(_generate), timeout=3.5)
 
-            if response and response.text and response.text.strip():
-                return response.text.strip(), candidate_model
+            if response and response.text:
+                validated = validate_model_output(response.text)
+                return validated, candidate_model
             else:
                 raise ValueError(f"Empty or malformed model output received from '{candidate_model}'")
         except Exception as model_err:
@@ -394,15 +424,14 @@ Please answer the user question directly, concisely, and professionally in clean
         "stream": False
     }
 
-    async with httpx.AsyncClient(timeout=5.0) as http_client:
+    async with httpx.AsyncClient(timeout=4.5) as http_client:
         resp = await http_client.post(url, json=payload, headers=headers)
         if resp.status_code != 200:
-            raise RuntimeError(f"Ollama API returned HTTP {resp.status_code}: {resp.text}")
+            raise RuntimeError(f"Ollama API returned HTTP {resp.status_code}")
         data = resp.json()
-        content = data.get("message", {}).get("content", "").strip()
-        if not content:
-            raise ValueError(f"Empty content from Ollama model {settings.OLLAMA_MODEL}")
-        return content, settings.OLLAMA_MODEL
+        content = data.get("message", {}).get("content", "")
+        validated = validate_model_output(content)
+        return validated, settings.OLLAMA_MODEL
 
 async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
     """
@@ -443,7 +472,7 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
             dataScope=context.tenantName,
             confidence="high",
             generatedAt=datetime.now(timezone.utc).isoformat(),
-            generation=GenerationMeta(source="local", model=None, fallbackUsed=False)
+            generation=GenerationMeta(source="local", provider="local", model=None, fallbackUsed=False, tier=3)
         )
 
     # 4B. LLM-Only Mode: Must succeed via Gemini or Ollama, or fail with clear service error
@@ -459,7 +488,7 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
                 dataScope=context.tenantName,
                 confidence="high",
                 generatedAt=datetime.now(timezone.utc).isoformat(),
-                generation=GenerationMeta(source="llm", model=model_used, fallbackUsed=False)
+                generation=GenerationMeta(source="llm", provider="gemini", model=model_used, fallbackUsed=False, tier=1)
             )
         except Exception as gemini_err:
             logger.warning(f"[AI Agent] LLM mode: Gemini failed ({gemini_err}). Trying Ollama...")
@@ -474,13 +503,13 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
                     dataScope=context.tenantName,
                     confidence="high",
                     generatedAt=datetime.now(timezone.utc).isoformat(),
-                    generation=GenerationMeta(source="llm", model=f"{ollama_model} (ollama)", fallbackUsed=False)
+                    generation=GenerationMeta(source="llm", provider="ollama", model=ollama_model, fallbackUsed=True, tier=2)
                 )
             except Exception as ollama_err:
                 logger.error(f"[AI Agent] LLM-only mode failed on both providers: {ollama_err}")
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"LLM Provider Error: Gemini ({str(gemini_err)}) and Ollama ({str(ollama_err)}) both failed."
+                    detail="LLM Provider Error: Configured cloud model providers failed to generate a valid response."
                 )
 
     # 4C. Auto Mode (Default): Tier 1 (Gemini) -> Tier 2 (Ollama Cloud) -> Tier 3 (Local Deterministic Engine)
@@ -499,7 +528,7 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
             dataScope=context.tenantName,
             confidence="high",
             generatedAt=datetime.now(timezone.utc).isoformat(),
-            generation=GenerationMeta(source="llm", model=model_used, fallbackUsed=False)
+            generation=GenerationMeta(source="llm", provider="gemini", model=model_used, fallbackUsed=False, tier=1)
         )
     except Exception as gemini_err:
         gemini_err_name = type(gemini_err).__name__
@@ -519,7 +548,7 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
             dataScope=context.tenantName,
             confidence="high",
             generatedAt=datetime.now(timezone.utc).isoformat(),
-            generation=GenerationMeta(source="llm", model=f"{ollama_model} (ollama)", fallbackUsed=False)
+            generation=GenerationMeta(source="llm", provider="ollama", model=ollama_model, fallbackUsed=True, tier=2)
         )
     except Exception as ollama_err:
         ollama_err_name = type(ollama_err).__name__
@@ -539,8 +568,10 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
         generatedAt=datetime.now(timezone.utc).isoformat(),
         generation=GenerationMeta(
             source="local",
+            provider="local",
             model=None,
             fallbackUsed=True,
+            tier=3,
             failureReason=f"Gemini: {gemini_err_name}, Ollama: {ollama_err_name}"
         )
     )

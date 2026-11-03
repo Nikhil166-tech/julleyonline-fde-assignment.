@@ -113,34 +113,72 @@ export class AiContextService {
       updatedAt: t.updatedAt.toISOString(),
     }));
 
-    // 6. Compute deterministic statistical metrics
-    const byColumn = {};
+    // 6. Compute authoritative statistical metrics across ALL matching tasks in PostgreSQL
+    // Uses database aggregation (groupBy & count) so metrics remain 100% accurate beyond MAX_CONTEXT_TASKS
+    const priorityGroups = await prisma.task.groupBy({
+      by: ['priority'],
+      where: taskWhere,
+      _count: { id: true },
+    });
     const byPriority = { LOW: 0, MEDIUM: 0, HIGH: 0, URGENT: 0 };
-    let overdueCount = 0;
-    let completedCount = 0;
-    let unassignedCount = 0;
-
-    for (const t of sanitizedTasks) {
-      byColumn[t.columnName] = (byColumn[t.columnName] || 0) + 1;
-      if (byPriority[t.priority] !== undefined) {
-        byPriority[t.priority]++;
-      }
-      if (!t.assigneeName) {
-        unassignedCount++;
-      }
-
-      const isCompleted = /done|completed|shipped|finished/i.test(t.columnName);
-      if (isCompleted) {
-        completedCount++;
-      }
-
-      if (t.dueDate) {
-        const dueTime = new Date(t.dueDate);
-        if (dueTime < now && !isCompleted) {
-          overdueCount++;
-        }
+    for (const pg of priorityGroups) {
+      if (byPriority[pg.priority] !== undefined) {
+        byPriority[pg.priority] = pg._count.id;
       }
     }
+
+    const columnGroups = await prisma.task.groupBy({
+      by: ['columnId'],
+      where: taskWhere,
+      _count: { id: true },
+    });
+    const columnIdToName = new Map(columns.map((c) => [c.id, c.name]));
+    const byColumn = {};
+    for (const c of columns) {
+      byColumn[c.name] = 0;
+    }
+    for (const cg of columnGroups) {
+      const colName = columnIdToName.get(cg.columnId) || 'Unknown';
+      byColumn[colName] = (byColumn[colName] || 0) + cg._count.id;
+    }
+
+    // Identify completed columns by name heuristic
+    // NOTE: Application semantics identify completed columns by name pattern (/done|completed|shipped|finished|closed/i).
+    // Results are explicitly labeled as inferred completion to preserve semantic transparency.
+    const completedColumnIds = columns
+      .filter((c) => /done|completed|shipped|finished|closed/i.test(c.name))
+      .map((c) => c.id);
+
+    let completedCount = 0;
+    if (completedColumnIds.length > 0) {
+      completedCount = await prisma.task.count({
+        where: {
+          ...taskWhere,
+          columnId: { in: completedColumnIds },
+        },
+      });
+    }
+
+    const overdueWhere = {
+      ...taskWhere,
+      dueDate: { lt: now },
+      ...(completedColumnIds.length > 0 ? { columnId: { notIn: completedColumnIds } } : {}),
+    };
+    const overdueCount = await prisma.task.count({ where: overdueWhere });
+
+    const tasksWithDueDatesCount = await prisma.task.count({
+      where: {
+        ...taskWhere,
+        dueDate: { not: null },
+      },
+    });
+
+    const unassignedCount = await prisma.task.count({
+      where: {
+        ...taskWhere,
+        assignedToUserId: null,
+      },
+    });
 
     // 7. Fetch bounded recent activity logs
     const activityWhere = {
@@ -189,9 +227,12 @@ export class AiContextService {
         completedTasks: completedCount,
         pendingTasks: Math.max(0, totalTasksCount - completedCount),
         overdueTasks: overdueCount,
+        tasksWithDueDates: tasksWithDueDatesCount,
         unassignedTasks: unassignedCount,
         byColumn,
         byPriority,
+        completionInferencePolicy: 'Column name heuristic matching (/done|completed|shipped|finished|closed/i). Labeled as inferred completion.',
+        isInferredCompletion: true,
       },
       boards: boards.map((b) => ({ id: b.id, name: b.name })),
       columns: columns.map((c) => ({ id: c.id, boardId: c.boardId, name: c.name, position: c.position })),

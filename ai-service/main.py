@@ -1,22 +1,17 @@
+import hmac
+import logging
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
 from schemas import ChatRequest, ChatResponse
 from config import settings
 from agent import ask_agent
 
+logger = logging.getLogger("ai_assistant_main")
+
 app = FastAPI(
     title="JulleyOnline AI Kanban Assistant Microservice",
     version="1.0.0",
-    description="Read-only, tenant-isolated AI question answering microservice for JulleyOnline."
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    description="Internal, read-only, tenant-isolated AI question answering microservice for JulleyOnline."
 )
 
 @app.get("/health", status_code=status.HTTP_200_OK)
@@ -33,12 +28,12 @@ async def chat_endpoint(
     payload: ChatRequest,
     x_service_token: str = Header(None, alias="X-Service-Token")
 ):
-    # Verify service token authentication if configured
+    # Verify service token authentication with constant-time comparison
     if settings.AI_SERVICE_TOKEN:
-        if not x_service_token or x_service_token != settings.AI_SERVICE_TOKEN:
+        if not x_service_token or not hmac.compare_digest(x_service_token, settings.AI_SERVICE_TOKEN):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized: Invalid or missing X-Service-Token"
+                detail="Unauthorized: Invalid service credentials"
             )
 
     try:
@@ -47,9 +42,10 @@ async def chat_endpoint(
     except HTTPException:
         raise
     except Exception as exc:
+        logger.error(f"[AI Service Error] Request processing failed: {type(exc).__name__}: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent execution failure: {str(exc)}"
+            detail="Internal AI service error occurred during request processing."
         )
 
 if __name__ == "__main__":

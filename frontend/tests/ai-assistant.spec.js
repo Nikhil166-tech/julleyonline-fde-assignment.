@@ -315,8 +315,10 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
             confidence: 'high',
             generation: {
               source: 'llm',
-              model: 'gemini-2.5-flash',
+              provider: 'gemini',
+              model: 'gemini-3.5-flash',
               fallbackUsed: false,
+              tier: 1,
             },
           },
         }),
@@ -341,7 +343,7 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     const disclosureBtn = page.locator('button:has-text("How this answer was generated")');
     await expect(disclosureBtn).toBeVisible();
     await disclosureBtn.click();
-    await expect(page.locator('[data-testid="ai-generation-source"]')).toContainText('Gemini (gemini-2.5-flash)');
+    await expect(page.locator('[data-testid="ai-generation-source"]')).toContainText('Google Gemini — gemini-3.5-flash');
   });
 
   test('AI-09: Displays subtle local fallback banner and metadata when LLM fails', async ({ page }) => {
@@ -367,8 +369,10 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
             confidence: 'high',
             generation: {
               source: 'local',
+              provider: 'local',
               model: null,
               fallbackUsed: true,
+              tier: 3,
               failureReason: 'ResourceExhausted',
             },
           },
@@ -400,6 +404,55 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     const disclosureBtn = page.locator('button:has-text("How this answer was generated")');
     await expect(disclosureBtn).toBeVisible();
     await disclosureBtn.click();
-    await expect(page.locator('[data-testid="ai-generation-source"]')).toContainText('Local Deterministic Fallback');
+    await expect(page.locator('[data-testid="ai-generation-source"]')).toContainText('Local workspace analysis');
+  });
+
+  test('AI-10: Displays Ollama Cloud secondary provider in technical disclosure with subtle secondary indicator', async ({ page }) => {
+    await page.route('**/api/v1/ai/chat', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            responseType: 'task_list',
+            answer: 'Here is the task analyzed by Ollama Cloud.',
+            structuredData: {
+              tasksAnalyzed: 1,
+              tasks: [{ id: 't-1', title: 'Task Beta', priority: 'URGENT', column: 'Backlog' }],
+            },
+            toolsUsed: ['get_tasks'],
+            recordsAnalyzed: 1,
+            dataScope: 'Engineering & Product',
+            confidence: 'high',
+            generation: {
+              source: 'llm',
+              provider: 'ollama',
+              model: 'gemma4:31b',
+              fallbackUsed: true,
+              tier: 2,
+            },
+          },
+        }),
+      });
+    });
+
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
+
+    await page.click('aside a[href="/ai-assistant"]');
+    await page.fill('textarea', 'Which task should I do first?');
+    await page.click('[data-testid="ai-ask-btn"]');
+
+    await expect(page.getByText('Here is the task analyzed by Ollama Cloud.')).toBeVisible();
+    await expect(page.locator('[data-testid="ai-fallback-indicator"]')).toContainText('Answered using secondary cloud model (Ollama).');
+
+    const disclosureBtn = page.locator('button:has-text("How this answer was generated")');
+    await expect(disclosureBtn).toBeVisible();
+    await disclosureBtn.click();
+    await expect(page.locator('[data-testid="ai-generation-source"]')).toContainText('Ollama Cloud — gemma4:31b');
   });
 });

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "gemma4:31b"
     AI_RESPONSE_MODE: str = "auto"  # 'auto', 'local', 'llm'
     MOCK_LLM: bool = False
-    HOST: str = "0.0.0.0"
+    HOST: str = "127.0.0.1"
     PORT: int = 8000
     AI_MAX_CONTEXT_TASKS: int = 100
     AI_MAX_ACTIVITY_RECORDS: int = 30

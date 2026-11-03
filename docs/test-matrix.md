@@ -226,4 +226,46 @@ Automated browser suite (`frontend/tests/e2e.spec.js`) running Chromium/Edge aga
 | `COL-09` | State Sync & Snapshot Protection | Synchronous task version tracking drops stale out-of-order socket events and protects optimistic mutations against delayed snapshot race conditions | **PASS** |
 | `COL-10` | Multi-Tab & Tenant Scoping | Multi-tab deduplication counts user once; tenant switching updates active users count accurately per workspace | **PASS** |
 
-**Total Automated Suite**: 117 Backend Unit & Integration Tests (100% pass) + 23 Playwright End-to-End Tests (100% pass) = 140 Automated Tests + Visual Regression Suites. Zero failures. All assertions verified against live PostgreSQL.
+---
+
+## 5. Phase 5: AI Kanban Assistant Test Suite (3-Tier Cascade & Aggregations)
+
+### Backend Express AI Gateway Tests (`backend/tests/ai.test.js`)
+| Test ID | Category | Scenario / Assertion | Status |
+| :--- | :--- | :--- | :--- |
+| `TC-AI-01` | Auth | Rejects unauthenticated request with HTTP 401 Unauthorized | **PASS** |
+| `TC-AI-02` | Validation | Rejects empty query or missing parameters with HTTP 400 Validation Error | **PASS** |
+| `TC-AI-03` | Tenant Scope | Rejects missing `X-Tenant-ID` header with HTTP 400 Validation Error | **PASS** |
+| `TC-AI-04` | Tenant Isolation | Rejects board belonging to a different tenant workspace with HTTP 403 Forbidden | **PASS** |
+| `TC-AI-05` | Data Sanitization | Validates sensitive fields (emails, passwords, hashes) stripped before microservice | **PASS** |
+| `TC-AI-06` | Upstream Forwarding| Forwards query and tenant context with valid `X-Service-Token` | **PASS** |
+| `TC-AI-07` | Response Schema | Propagates structured typed response payload and context metrics to client | **PASS** |
+| `TC-AI-08` | Timeout / 504 | Gateway timeout handling returns HTTP 504 when microservice exceeds deadline | **PASS** |
+| `TC-AI-09` | Error Sanitization | Microservice failure returns sanitized error without internal trace leaks | **PASS** |
+| `TC-AI-10` | High-Scale Aggregation | 250 tasks scale test: PostgreSQL `groupBy` and `count` compute exact aggregates while LLM context remains bounded to 100 tasks | **PASS** |
+| `TC-AI-11` | 3-Tier Provenance | Verifies `generation` payload contract (`source`, `provider`, `tier`, `fallbackUsed`) across Gemini, Ollama, and Local paths | **PASS** |
+
+### Python Microservice Unit, Security & Scenario Tests (`ai-service/tests/`)
+| Test Module | Tests | Focus Areas / Verifications | Status |
+| :--- | :---: | :--- | :--- |
+| `test_agent.py` | 25 | 3-tier cascade (Gemini $\to$ Ollama Cloud $\to$ Local Engine), `AI_RESPONSE_MODE` (auto/local/llm), 4 intent guardrail cases (A: zero due dates, B: cross-org denial, C: password denial, D: actual overdue), truncation truthfulness with >100 tasks, output validation (`validate_model_output`) | **PASS** |
+| `test_security.py` | 3 | Constant-time `hmac.compare_digest` service token verification, prompt injection defense, schema validation | **PASS** |
+| `test_tools.py` | 4 | Read-only tool execution: `get_tasks`, `get_overdue_tasks`, `get_activity_logs`, `get_board_summary` with authoritative metrics consumption | **PASS** |
+
+### Playwright End-to-End AI Assistant Browser Tests (`frontend/tests/ai-assistant.spec.js`)
+| Test ID | Category | Scenario / Assertion | Status |
+| :--- | :--- | :--- | :--- |
+| `AI-01` | Header & Controls | AI Assistant title, read-only indicator, tenant context, and board scope selector | **PASS** |
+| `AI-02` | Structured Widgets | Overdue query renders structured widget, stat cards, and expandable tool disclosure toggle | **PASS** |
+| `AI-03` | Race Protection | Tenant switching immediately aborts in-flight AI queries and resets conversation state | **PASS** |
+| `AI-04` | Error Handling | Microservice 503 error alert renders cleanly and can be dismissed | **PASS** |
+| `AI-05` | Zero Due Dates | Case A: Workspace with no due dates renders informative alert and 0 overdue tasks | **PASS** |
+| `AI-06` | Guardrail Notices | Case B & C: Cross-org query renders `scope_notice`; password inquiry renders `security_notice` | **PASS** |
+| `AI-07` | UX & Mobile | Multiline composer (Enter to send, Shift+Enter for newline) and mobile responsive layout (375x667) | **PASS** |
+| `AI-08` | Gemini Provenance | Tier 1 Gemini generation displayed in disclosure without fallback banner | **PASS** |
+| `AI-09` | Local Fallback | Tier 3 Local fallback displays subtle informational indicator without raw technical errors | **PASS** |
+| `AI-10` | Ollama Provenance | Tier 2 Ollama Cloud generation displayed in disclosure with secondary fallback indicator | **PASS** |
+
+---
+
+**Total Automated Suite**: 128 Backend Tests + 32 Python AI Tests + 33 Playwright End-to-End Tests = **193 Automated Tests** Passing with 100% Deterministic Execution Evidence. Zero failures.

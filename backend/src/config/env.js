@@ -42,6 +42,16 @@ export const envSchema = z.object({
     .optional()
     .default('15000')
     .transform((val) => parseInt(val, 10) || 15000),
+}).superRefine((data, ctx) => {
+  if (data.NODE_ENV === 'production' && data.AI_ASSISTANT_ENABLED) {
+    if (!data.AI_SERVICE_TOKEN || data.AI_SERVICE_TOKEN === 'dev-ai-service-token-secret' || data.AI_SERVICE_TOKEN.length < 16) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'AI_SERVICE_TOKEN must be explicitly set with a strong secret (at least 16 characters) in production',
+        path: ['AI_SERVICE_TOKEN'],
+      });
+    }
+  }
 });
 
 export function validateConfig(customEnv = process.env) {
