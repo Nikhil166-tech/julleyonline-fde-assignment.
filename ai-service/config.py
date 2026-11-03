@@ -9,10 +9,26 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     AI_MODEL: str = "gemini-3.5-flash"
     FALLBACK_MODEL: str = "gemini-3.8-flash"
+    AI_RESPONSE_MODE: str = "auto"  # 'auto', 'local', 'llm'
     MOCK_LLM: bool = False
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     AI_MAX_CONTEXT_TASKS: int = 100
     AI_MAX_ACTIVITY_RECORDS: int = 30
+
+    @property
+    def effective_response_mode(self) -> str:
+        """
+        Resolves effective mode with backward compatibility.
+        Precedence:
+        1. If MOCK_LLM is True, force 'local'
+        2. Otherwise use AI_RESPONSE_MODE ('auto', 'local', 'llm')
+        """
+        if self.MOCK_LLM:
+            return "local"
+        mode = (self.AI_RESPONSE_MODE or "auto").strip().lower()
+        if mode in ["auto", "local", "llm"]:
+            return mode
+        return "auto"
 
 settings = Settings()

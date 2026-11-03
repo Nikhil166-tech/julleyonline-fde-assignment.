@@ -53,6 +53,7 @@ export class AiService {
         generatedAt: data.generatedAt || new Date().toISOString(),
         recordsAnalyzed: data.recordsAnalyzed ?? null,
         dataScope: data.dataScope || null,
+        generation: data.generation || { source: 'local', model: null, fallbackUsed: false },
       };
     } catch (err) {
       clearTimeout(timeout);

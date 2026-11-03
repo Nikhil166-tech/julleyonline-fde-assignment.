@@ -9,11 +9,17 @@ This document provides the complete architecture, security model, response type 
 The **AI Kanban Assistant** is an additive, optional, read-only intelligence extension designed to assist multi-tenant engineering and product teams. It answers natural-language workspace questions grounded strictly in authorized, real-time Kanban data, rendered via enterprise-grade UI components rather than raw plain text.
 
 ### Key Refinements Applied:
-1. **Explicit, Validated Response Types:** System classifies answers into typed categories (`overdue_summary`, `board_summary`, `task_list`, `activity_summary`, `scope_notice`, `security_notice`, `general_answer`) to render tailored interactive widgets.
-2. **Intent Gating Guardrails:** Dedicated pre-execution security layer protects credentials and cross-organization boundaries before calling tools or LLM APIs.
-3. **Safe Markdown Rendering:** Clean typography with zero raw markdown syntax leaks (`**bold**` parsed into semantic bold, styled bullet points, and code badges).
-4. **Tool Details Clutter Reduction:** Replaced raw tool name dumps with a clean summary footer (records analyzed, data scope, timestamp) and a subtle expandable *"How this answer was generated"* disclosure.
-5. **Multi-Model Support:** Configured for `gemini-3.5-flash` with automatic fallback to `gemini-3.8-flash` and deterministic in-memory calculation.
+1. **LLM-First Architecture with Automatic Local Fallback:** Google Gemini is the primary generative engine (`gemini-2.5-flash`, with support for `gemini-3.5-flash` / `gemini-3.8-flash`), backed by a bounded retry policy. When the external provider encounters rate limits (HTTP 429), transient outages (HTTP 503), timeouts, or network errors, the assistant seamlessly falls back to its deterministic Python engine without user downtime.
+2. **Three Configurable Response Modes (`AI_RESPONSE_MODE`):**
+   - `auto` (default): Attempts Gemini first; automatically invokes the deterministic local response engine when Gemini fails or returns unusable output.
+   - `local`: Executes the deterministic Python response engine directly without external network requests.
+   - `llm`: Invokes Gemini only, returning HTTP 502 Bad Gateway if the provider fails.
+3. **Transparent Generation Metadata Contract:** Every response includes authoritative provenance: `{ source: "llm" | "local" | "guardrail", model: string | null, fallbackUsed: boolean, failureReason?: string }`.
+4. **Subtle Enterprise UX on Fallback:** When a fallback occurs, the UI displays a clean informational indicator (*"Answered using local workspace analysis."*) and reflects the source in the disclosure without alarming users with raw technical error codes.
+5. **Explicit, Validated Response Types:** System classifies answers into typed categories (`overdue_summary`, `board_summary`, `task_list`, `activity_summary`, `scope_notice`, `security_notice`, `general_answer`) to render tailored interactive widgets.
+6. **Intent Gating Guardrails:** Dedicated pre-execution security layer protects credentials and cross-organization boundaries before calling tools or LLM APIs.
+7. **Safe Markdown Rendering:** Clean typography with zero raw markdown syntax leaks (`**bold**` parsed into semantic bold, styled bullet points, and code badges).
+8. **Tool Details Clutter Reduction:** Replaced raw tool name dumps with a clean summary footer (records analyzed, data scope, timestamp) and a subtle expandable *"How this answer was generated"* disclosure showing Generation Source and Allowlisted Tools.
 
 ---
 
@@ -145,33 +151,47 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ### Environment Variables (`ai-service/.env`)
+- `AI_RESPONSE_MODE`: Operating mode (`auto` [default], `local`, or `llm`).
+- `MOCK_LLM`: Backward-compatible override. When `true`, forces `local` mode.
 - `GEMINI_API_KEY`: Google Gemini API key.
-- `AI_MODEL`: Primary model (`gemini-3.5-flash`).
-- `FALLBACK_MODEL`: Failover model (`gemini-3.8-flash`).
+- `AI_MODEL`: Primary Gemini model (`gemini-2.5-flash` or `gemini-3.5-flash`).
+- `FALLBACK_MODEL`: Secondary Gemini model (`gemini-3.8-flash`).
 - `AI_SERVICE_TOKEN`: Shared secret token for Express gateway (`dev-ai-service-token-secret`).
 
 ---
 
 ## 8. Automated Verification Evidence
 
-The refined AI assistant is validated across unit, security, integration, and browser automation test suites:
+The LLM-first AI assistant with automatic fallback is verified across unit, security, integration, and browser automation test suites:
 
 ### 1. Python Unit, Security & Scenario Suite (`ai-service/tests/`)
-- **17 passed, 0 failed (100% pass rate)**
-- `test_agent.py` (10 tests):
+- **29 passed, 0 failed (100% pass rate)**
+- `test_agent.py` (22 tests):
   - **Case A (`test_case_a_no_due_dates`):** 11 tasks across 2 boards with no due dates -> returns 0 overdue, 11 analyzed, 0 with due dates, clear explanation.
   - **Case B (`test_case_b_other_organizations`):** Other organization queries -> returns `scope_notice`, 0 tools called.
   - **Case C (`test_case_c_account_password`):** Password inquiries -> returns `security_notice`, 0 tools called.
   - **Case D (`test_case_d_actual_overdue_tasks`):** Tasks with known UTC timestamps -> verified correct classification and days overdue.
+  - **Test 1:** Valid Gemini response generates `source=llm`, `fallbackUsed=false`.
+  - **Test 2:** Successful Gemini call does not invoke fallback engine.
+  - **Test 3:** Gemini HTTP 429 quota exhaustion invokes local fallback seamlessly.
+  - **Test 4:** Gemini HTTP 503 transient service error invokes local fallback.
+  - **Test 5:** LLM request timeout automatically invokes deterministic fallback.
+  - **Test 6:** Network disconnect / DNS failure triggers local fallback.
+  - **Test 7:** Missing or invalid API key in `auto` mode falls back gracefully.
+  - **Test 8:** Empty or malformed output from LLM triggers local fallback.
+  - **Test 9:** `AI_RESPONSE_MODE=local` executes deterministic engine without network calls.
+  - **Test 10:** `AI_RESPONSE_MODE=llm` fails with HTTP 502 and does not use local fallback.
+  - **Test 11:** Numerical statistics and records analyzed match identically between modes.
+  - **Test 12:** Generation metadata contract is accurate across guardrail, local, fallback, and LLM paths.
 - `test_security.py` (3 tests): Service token authentication, prompt injection resistance, schema rejection.
 - `test_tools.py` (4 tests): Tool execution verification across overdue, activities, task lists, and board summaries.
 
 ### 2. Backend Express Gateway Suite (`backend/tests/ai.test.js`)
-- **8 passed, 0 failed (100% pass rate)**
-- Validates token authentication, tenant header scoping, foreign board rejection (`403 Forbidden`), sensitive data stripping, and structured response propagation.
+- **9 passed, 0 failed (100% pass rate)**
+- Validates token authentication, tenant header scoping, foreign board rejection (`403 Forbidden`), sensitive data stripping, structured response propagation, and accurate fallback metadata forwarding (`TC-AI-09`).
 
 ### 3. Playwright Frontend End-to-End Suite (`frontend/tests/ai-assistant.spec.js`)
-- **7 passed, 0 failed (100% pass rate)**
+- **9 passed, 0 failed (100% pass rate)**
 - `AI-01`: Header context, read-only indicator, and board selector verification.
 - `AI-02`: Overdue query submission, structured widget rendering, and expandable tool disclosure toggle.
 - `AI-03`: Tenant switching cancellation and chat state reset.
@@ -179,9 +199,11 @@ The refined AI assistant is validated across unit, security, integration, and br
 - `AI-05`: Case A zero-due-dates workspace verification.
 - `AI-06`: Case B & C scope and security notice widget verification without tool clutter.
 - `AI-07`: Keyboard interaction (Enter to send, Shift+Enter for newline) and mobile responsive layout (375x667).
+- `AI-08`: Gemini LLM generation source displayed in disclosure without fallback banner.
+- `AI-09`: Subtle local fallback indicator (*"Answered using local workspace analysis."*) and metadata displayed when LLM fails without exposing raw technical errors.
 
 ### Full Regression Suite Status
-- **Backend Tests:** 125 passed / 125 total (117 core + 8 AI tests).
-- **Playwright E2E Tests:** 30 passed / 30 total (23 core + 7 AI tests).
-- **Python Tests:** 17 passed / 17 total.
-- **Total Automated Passing Tests:** **172 tests**.
+- **Backend Tests:** 126 passed / 126 total (117 core + 9 AI tests).
+- **Playwright E2E Tests:** 32 passed / 32 total (23 core + 9 AI tests).
+- **Python Tests:** 29 passed / 29 total.
+- **Total Automated Passing Tests:** **187 tests**.

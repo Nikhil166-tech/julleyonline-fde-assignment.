@@ -292,4 +292,114 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     await expect(page.getByText('Read-Only', { exact: true })).toBeVisible();
     await expect(page.locator('[data-testid="ai-ask-btn"]')).toBeVisible();
   });
+
+  test('AI-08: Displays Gemini LLM generation source in technical disclosure without fallback indicator', async ({ page }) => {
+    await page.route('**/api/v1/ai/chat', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            responseType: 'task_list',
+            answer: 'Here are the high-priority tasks analyzed by Gemini.',
+            structuredData: {
+              tasksAnalyzed: 2,
+              tasks: [
+                { id: 't-1', title: 'Task Alpha', priority: 'HIGH', column: 'To Do' },
+              ],
+            },
+            toolsUsed: ['get_tasks'],
+            recordsAnalyzed: 2,
+            dataScope: 'Engineering & Product',
+            confidence: 'high',
+            generation: {
+              source: 'llm',
+              model: 'gemini-2.5-flash',
+              fallbackUsed: false,
+            },
+          },
+        }),
+      });
+    });
+
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
+
+    await page.click('aside a[href="/ai-assistant"]');
+    await page.fill('textarea', 'Show high priority tasks');
+    await page.click('[data-testid="ai-ask-btn"]');
+
+    await expect(page.getByText('Here are the high-priority tasks analyzed by Gemini.')).toBeVisible();
+    // Verify fallback indicator is NOT visible
+    await expect(page.locator('[data-testid="ai-fallback-indicator"]')).not.toBeVisible();
+
+    // Expand disclosure and check source
+    const disclosureBtn = page.locator('button:has-text("How this answer was generated")');
+    await expect(disclosureBtn).toBeVisible();
+    await disclosureBtn.click();
+    await expect(page.locator('[data-testid="ai-generation-source"]')).toContainText('Gemini (gemini-2.5-flash)');
+  });
+
+  test('AI-09: Displays subtle local fallback banner and metadata when LLM fails', async ({ page }) => {
+    await page.route('**/api/v1/ai/chat', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            responseType: 'overdue_summary',
+            answer: 'Local workspace analysis found 1 overdue task.',
+            structuredData: {
+              tasksAnalyzed: 3,
+              overdueCount: 1,
+              tasks: [
+                { id: 't-1', title: 'Critical Patch', priority: 'URGENT', column: 'To Do', daysPastDue: 2 },
+              ],
+            },
+            toolsUsed: ['get_overdue_tasks'],
+            recordsAnalyzed: 3,
+            dataScope: 'Engineering & Product',
+            confidence: 'high',
+            generation: {
+              source: 'local',
+              model: null,
+              fallbackUsed: true,
+              failureReason: 'ResourceExhausted',
+            },
+          },
+        }),
+      });
+    });
+
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
+
+    await page.click('aside a[href="/ai-assistant"]');
+    await page.fill('textarea', 'Which tasks are overdue?');
+    await page.click('[data-testid="ai-ask-btn"]');
+
+    await expect(page.getByText('Local workspace analysis found 1 overdue task.')).toBeVisible();
+    
+    // Verify subtle fallback indicator is visible
+    const fallbackIndicator = page.locator('[data-testid="ai-fallback-indicator"]');
+    await expect(fallbackIndicator).toBeVisible();
+    await expect(fallbackIndicator).toHaveText('Answered using local workspace analysis.');
+
+    // Verify raw technical error code is NOT rendered in user face
+    await expect(page.getByText('ResourceExhausted')).not.toBeVisible();
+
+    // Expand disclosure and verify Local Deterministic Fallback label
+    const disclosureBtn = page.locator('button:has-text("How this answer was generated")');
+    await expect(disclosureBtn).toBeVisible();
+    await disclosureBtn.click();
+    await expect(page.locator('[data-testid="ai-generation-source"]')).toContainText('Local Deterministic Fallback');
+  });
 });

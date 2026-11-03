@@ -61,6 +61,12 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000)
     context: WorkspaceContext
 
+class GenerationMeta(BaseModel):
+    source: str = "local"  # "llm", "local", "guardrail"
+    model: Optional[str] = None
+    fallbackUsed: bool = False
+    failureReason: Optional[str] = None
+
 class ChatResponse(BaseModel):
     responseType: str = "general_answer"  # task_list, overdue_summary, board_summary, activity_summary, scope_notice, security_notice, general_answer, error
     answer: str
@@ -70,3 +76,4 @@ class ChatResponse(BaseModel):
     generatedAt: str
     recordsAnalyzed: Optional[int] = None
     dataScope: Optional[str] = None
+    generation: GenerationMeta = Field(default_factory=GenerationMeta)

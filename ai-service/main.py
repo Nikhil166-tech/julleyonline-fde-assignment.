@@ -44,6 +44,8 @@ async def chat_endpoint(
     try:
         response = await ask_agent(payload.message, payload.context)
         return response
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

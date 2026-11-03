@@ -361,3 +361,214 @@ async def test_case_d_actual_overdue_tasks():
     assert "Fix SSL Certificate" in resp.answer
     assert "Migrate DB" not in resp.answer # Done task must not be listed as overdue
     assert resp.structuredData["tasks"][0]["daysPastDue"] == 3
+
+
+# -------------------------------------------------------------
+# LLM-FIRST & AUTOMATIC LOCAL FALLBACK TEST SUITE
+# -------------------------------------------------------------
+from unittest.mock import AsyncMock, patch
+from fastapi import HTTPException
+import asyncio
+
+@pytest.mark.asyncio
+async def test_valid_gemini_generates_llm_source(sample_context, monkeypatch):
+    """Test 1: Valid Gemini response produces source='llm', fallbackUsed=False."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.return_value = ("**Gemini Answer**: 1 task overdue in Sprint MVP.", "gemini-2.5-flash")
+        resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+        assert resp.generation.source == "llm"
+        assert resp.generation.fallbackUsed is False
+        assert resp.generation.model == "gemini-2.5-flash"
+        assert "Gemini Answer" in resp.answer
+        assert resp.structuredData["overdueCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_successful_gemini_does_not_invoke_fallback(sample_context, monkeypatch):
+    """Test 2: When Gemini succeeds, fallback response engine is not used."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.return_value = ("Gemini primary output", "gemini-2.5-flash")
+        resp = await agent.ask_agent("What are the most urgent tasks?", sample_context)
+
+        assert mock_gemini.await_count == 1
+        assert resp.generation.fallbackUsed is False
+        assert resp.answer == "Gemini primary output"
+
+
+@pytest.mark.asyncio
+async def test_gemini_http_429_invokes_local_fallback(sample_context, monkeypatch):
+    """Test 3: Gemini HTTP 429 quota exhaustion invokes local fallback seamlessly."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = Exception("429 ResourceExhausted: Quota exceeded for model")
+        resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+        assert resp.generation.source == "local"
+        assert resp.generation.fallbackUsed is True
+        assert resp.generation.failureReason == "Exception"
+        assert "Deploy Staging" in resp.answer
+        assert resp.structuredData["overdueCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_http_503_invokes_local_fallback(sample_context, monkeypatch):
+    """Test 4: Gemini HTTP 503 transient service error invokes local fallback."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = Exception("503 ServiceUnavailable: The model is overloaded")
+        resp = await agent.ask_agent("Summarize today's activities", sample_context)
+
+        assert resp.generation.source == "local"
+        assert resp.generation.fallbackUsed is True
+        assert "Bob" in resp.answer
+
+
+@pytest.mark.asyncio
+async def test_gemini_timeout_invokes_local_fallback(sample_context, monkeypatch):
+    """Test 5: LLM request timeout automatically invokes deterministic fallback."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = asyncio.TimeoutError("Gemini request timed out after 10s")
+        resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+        assert resp.generation.source == "local"
+        assert resp.generation.fallbackUsed is True
+        assert resp.generation.failureReason == "TimeoutError"
+        assert "Deploy Staging" in resp.answer
+
+
+@pytest.mark.asyncio
+async def test_network_failure_invokes_local_fallback(sample_context, monkeypatch):
+    """Test 6: Network disconnect / DNS failure triggers local fallback."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = ConnectionError("Failed to establish connection to generativelanguage.googleapis.com")
+        resp = await agent.ask_agent("Show tasks that are still pending", sample_context)
+
+        assert resp.generation.source == "local"
+        assert resp.generation.fallbackUsed is True
+        assert resp.generation.failureReason == "ConnectionError"
+        assert "Deploy Staging" in resp.answer
+
+
+@pytest.mark.asyncio
+async def test_missing_or_invalid_api_key_invokes_local_fallback(sample_context, monkeypatch):
+    """Test 7: Missing or invalid API key in auto mode falls back gracefully."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = ValueError("GEMINI_API_KEY is not configured or invalid")
+        resp = await agent.ask_agent("What are the most urgent tasks?", sample_context)
+
+        assert resp.generation.source == "local"
+        assert resp.generation.fallbackUsed is True
+        assert "Deploy Staging" in resp.answer
+
+
+@pytest.mark.asyncio
+async def test_malformed_empty_output_invokes_local_fallback(sample_context, monkeypatch):
+    """Test 8: Empty or invalid output from LLM triggers local fallback."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = ValueError("Empty or malformed model output received")
+        resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+        assert resp.generation.source == "local"
+        assert resp.generation.fallbackUsed is True
+        assert "Deploy Staging" in resp.answer
+
+
+@pytest.mark.asyncio
+async def test_response_mode_local_never_calls_gemini(sample_context, monkeypatch):
+    """Test 9: AI_RESPONSE_MODE=local executes local deterministic engine directly."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "local")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+        assert mock_gemini.await_count == 0
+        assert resp.generation.source == "local"
+        assert resp.generation.fallbackUsed is False
+        assert resp.generation.model is None
+        assert "Deploy Staging" in resp.answer
+
+
+@pytest.mark.asyncio
+async def test_response_mode_llm_raises_502_on_failure(sample_context, monkeypatch):
+    """Test 10: AI_RESPONSE_MODE=llm raises HTTP 502 Bad Gateway and does not fallback."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "llm")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = RuntimeError("Provider 503 Service Unavailable")
+        
+        with pytest.raises(HTTPException) as exc_info:
+            await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+        assert exc_info.value.status_code == 502
+        assert "LLM Provider Error" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_numerical_statistics_identical_between_modes(sample_context, monkeypatch):
+    """Test 11: Authoritative structured statistics match identically between modes."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "local")
+    resp_local = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.return_value = ("Gemini formatted answer", "gemini-2.5-flash")
+        resp_llm = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+    # Identical authoritative statistics
+    assert resp_local.structuredData == resp_llm.structuredData
+    assert resp_local.recordsAnalyzed == resp_llm.recordsAnalyzed
+    assert resp_local.responseType == resp_llm.responseType
+
+
+@pytest.mark.asyncio
+async def test_fallback_metadata_accuracy(sample_context, monkeypatch):
+    """Test 12: Generation metadata contract fields are accurate across all branches."""
+    # 1. Guardrail
+    guard_resp = await agent.ask_agent("What is the admin password?", sample_context)
+    assert guard_resp.generation.source == "guardrail"
+    assert guard_resp.generation.fallbackUsed is False
+    assert guard_resp.generation.model is None
+
+    # 2. Local mode
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "local")
+    local_resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+    assert local_resp.generation.source == "local"
+    assert local_resp.generation.fallbackUsed is False
+    assert local_resp.generation.model is None
+
+    # 3. Fallback
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.side_effect = ConnectionError("Network down")
+        fb_resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+        assert fb_resp.generation.source == "local"
+        assert fb_resp.generation.fallbackUsed is True
+        assert fb_resp.generation.failureReason == "ConnectionError"
+

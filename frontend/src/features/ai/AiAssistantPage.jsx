@@ -510,6 +510,7 @@ export function AiAssistantPage() {
           recordsAnalyzed: res.data.recordsAnalyzed,
           dataScope: res.data.dataScope || activeTenant?.name || 'Workspace',
           confidence: res.data.confidence || 'high',
+          generation: res.data.generation || { source: 'local', model: null, fallbackUsed: false },
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, aiMsg]);
@@ -672,6 +673,17 @@ export function AiAssistantPage() {
                   {/* Clean AI Metadata & Subtle Expandable Disclosure Footer */}
                   {msg.sender === 'ai' && (
                     <div className="mt-3 pt-2.5 border-t border-slate-700/50 flex flex-col gap-1.5 text-[11px] text-slate-400">
+                      {/* Subtle fallback indicator when fallbackUsed is true */}
+                      {msg.generation?.fallbackUsed && (
+                        <div
+                          data-testid="ai-fallback-indicator"
+                          className="flex items-center gap-1.5 text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-md mb-1 w-fit"
+                        >
+                          <Info className="w-3.5 h-3.5 shrink-0" />
+                          <span>Answered using local workspace analysis.</span>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="flex items-center gap-2 text-slate-400">
                           {msg.recordsAnalyzed !== null && msg.recordsAnalyzed !== undefined && msg.recordsAnalyzed > 0 && (
@@ -700,19 +712,35 @@ export function AiAssistantPage() {
                       </div>
 
                       {/* Expanded Technical Tool Details */}
-                      {expandedDetails[msg.id] && msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                      {expandedDetails[msg.id] && (
                         <div className="mt-1.5 p-2 rounded-lg bg-slate-900/60 border border-slate-800 text-[10px] space-y-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-slate-400">Allowlisted Tools:</span>
-                            {msg.toolsUsed.map((tool, i) => (
-                              <span
-                                key={i}
-                                className="px-1.5 py-0.5 rounded bg-slate-800 text-brand-300 font-mono border border-slate-700/70"
-                              >
-                                {tool}
+                          {msg.generation && (
+                            <div className="flex items-center gap-1.5" data-testid="ai-generation-source">
+                              <span className="text-slate-400">Generation Source:</span>
+                              <span className="font-medium text-slate-300">
+                                {msg.generation.source === 'llm'
+                                  ? `Gemini (${msg.generation.model || 'gemini-2.5-flash'})`
+                                  : msg.generation.fallbackUsed
+                                  ? `Local Deterministic Fallback`
+                                  : msg.generation.source === 'guardrail'
+                                  ? 'Security Guardrail'
+                                  : 'Local Deterministic Engine'}
                               </span>
-                            ))}
-                          </div>
+                            </div>
+                          )}
+                          {msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-400">Allowlisted Tools:</span>
+                              {msg.toolsUsed.map((tool, i) => (
+                                <span
+                                  key={i}
+                                  className="px-1.5 py-0.5 rounded bg-slate-800 text-brand-300 font-mono border border-slate-700/70"
+                                >
+                                  {tool}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <div className="text-slate-500">
                             Confidence: <span className="text-slate-300 capitalize">{msg.confidence}</span>
                           </div>

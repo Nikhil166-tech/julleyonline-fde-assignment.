@@ -48,6 +48,7 @@ router.post('/chat', async (req, res, next) => {
         generatedAt: aiResult.generatedAt,
         recordsAnalyzed: aiResult.recordsAnalyzed ?? context.metrics.totalTasks,
         dataScope: aiResult.dataScope || context.tenantName,
+        generation: aiResult.generation || { source: 'local', model: null, fallbackUsed: false },
         contextMeta: {
           tenantId: context.tenantId,
           tenantName: context.tenantName,

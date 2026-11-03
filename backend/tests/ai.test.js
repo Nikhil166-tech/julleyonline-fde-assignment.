@@ -105,6 +105,11 @@ describe('AI Kanban Assistant Backend Test Suite', () => {
               generatedAt: new Date().toISOString(),
               recordsAnalyzed: 4,
               dataScope: 'Engineering & Product',
+              generation: {
+                source: 'llm',
+                model: 'gemini-2.5-flash',
+                fallbackUsed: false,
+              },
             })
           );
         });
@@ -297,8 +302,71 @@ describe('AI Kanban Assistant Backend Test Suite', () => {
       assert.equal(body.data.dataScope, 'Engineering & Product');
       assert.equal(body.data.contextMeta.tenantId, acmeEngTenant.id);
       assert.equal(body.data.contextMeta.boardId, engBoard.id);
+      assert.deepEqual(body.data.generation, {
+        source: 'llm',
+        model: 'gemini-2.5-flash',
+        fallbackUsed: false,
+      });
     } finally {
       config.aiServiceUrl = originalUrl;
+    }
+  });
+
+  it('TC-AI-09: accurately forwards fallback generation metadata when local engine handles request', async () => {
+    // Temporarily swap mock to return fallback metadata
+    const originalUrl = config.aiServiceUrl;
+    const fallbackServer = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          responseType: 'overdue_summary',
+          answer: 'Local fallback: 1 task overdue.',
+          structuredData: { overdueCount: 1 },
+          toolsUsed: ['get_overdue_tasks'],
+          confidence: 'high',
+          generatedAt: new Date().toISOString(),
+          recordsAnalyzed: 1,
+          dataScope: 'Engineering & Product',
+          generation: {
+            source: 'local',
+            model: null,
+            fallbackUsed: true,
+            failureReason: 'ServerError',
+          },
+        })
+      );
+    });
+
+    let fbPort;
+    await new Promise((resolve) => {
+      fallbackServer.listen(0, () => {
+        fbPort = fallbackServer.address().port;
+        resolve();
+      });
+    });
+
+    config.aiServiceUrl = `http://127.0.0.1:${fbPort}`;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/ai/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bobToken}`,
+          'X-Tenant-ID': acmeEngTenant.id,
+        },
+        body: JSON.stringify({ message: 'Which tasks are overdue?' }),
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.success, true);
+      assert.equal(body.data.generation.source, 'local');
+      assert.equal(body.data.generation.fallbackUsed, true);
+      assert.equal(body.data.generation.failureReason, 'ServerError');
+    } finally {
+      config.aiServiceUrl = originalUrl;
+      await new Promise((res) => fallbackServer.close(res));
     }
   });
 });

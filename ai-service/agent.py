@@ -1,10 +1,15 @@
 import json
 import re
+import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple, Optional
-from schemas import WorkspaceContext, ChatResponse
+from fastapi import HTTPException, status
+from schemas import WorkspaceContext, ChatResponse, GenerationMeta
 from config import settings
 import tools
+
+logger = logging.getLogger("ai_assistant")
 
 SYSTEM_INSTRUCTION = """You are the JulleyOnline AI Kanban Assistant.
 You are a read-only, factual assistant operating within an enterprise multi-tenant Kanban system.
@@ -43,7 +48,8 @@ def check_intent_guardrails(message: str, context: WorkspaceContext) -> Optional
             recordsAnalyzed=0,
             dataScope=context.tenantName,
             confidence="high",
-            generatedAt=datetime.now(timezone.utc).isoformat()
+            generatedAt=datetime.now(timezone.utc).isoformat(),
+            generation=GenerationMeta(source="guardrail", model=None, fallbackUsed=False)
         )
 
     # Guardrail 2: Cross-Organization / Out-of-Scope Isolation (Case B)
@@ -63,7 +69,8 @@ def check_intent_guardrails(message: str, context: WorkspaceContext) -> Optional
             recordsAnalyzed=0,
             dataScope=context.tenantName,
             confidence="high",
-            generatedAt=datetime.now(timezone.utc).isoformat()
+            generatedAt=datetime.now(timezone.utc).isoformat(),
+            generation=GenerationMeta(source="guardrail", model=None, fallbackUsed=False)
         )
 
     return None
@@ -81,7 +88,7 @@ def detect_tool_intents(message: str) -> List[str]:
     if any(k in msg for k in ["activit", "recent change", "history", "who did what", "audit", "today", "log"]):
         tools_to_run.append("get_activity_logs")
 
-    if any(k in msg for k in ["progress", "summary", "statistic", "overview", "metric", "breakdown", "status of board", "how is"]):
+    if any(k in msg for k in ["progress", "summary", "statistic", "overview", "metric", "breakdown", "status of board", "how is", "summarize my workspace"]):
         tools_to_run.append("get_board_summary")
 
     if any(k in msg for k in ["pending", "in progress", "backlog", "todo", "to do", "urgent", "priority", "task", "assigned", "work completed", "done", "show tasks"]):
@@ -137,7 +144,7 @@ def synthesize_deterministic_response(
 ) -> Tuple[str, Dict[str, Any], int]:
     """
     Constructs deterministic, grounded responses and structured data payloads.
-    Guarantees consistent, testable enterprise answers for offline mode and tests.
+    Serves as the reusable local response engine and automatic fallback.
     """
     msg = message.lower()
     workspace_name = context.tenantName
@@ -284,35 +291,24 @@ def synthesize_deterministic_response(
     answer = f"The active workspace **{workspace_name}** contains **{total} task(s)** across **{len(context.columns)} column(s)**."
     return answer, summary, total
 
-async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
+async def call_gemini(
+    message: str,
+    context: WorkspaceContext,
+    tool_results: Dict[str, Any],
+    response_type: str
+) -> Tuple[str, str]:
     """
-    Main entry point for AI question answering.
-    1. Checks intent guardrails (Security & Cross-Org isolation).
-    2. Identifies & executes allowlisted read-only tools.
-    3. Resolves responseType and builds structured enterprise output.
+    Attempts Gemini LLM generation with a bounded retry policy.
+    Returns (answer_text, model_name).
+    Raises Exception on failure.
     """
-    # 1. Guardrails Check (Fast deterministic pre-filter)
-    guardrail_response = check_intent_guardrails(message, context)
-    if guardrail_response:
-        return guardrail_response
+    if not settings.GEMINI_API_KEY:
+        raise ValueError("Missing GEMINI_API_KEY: Provider is not configured")
 
-    # 2. Tool Execution
-    tool_names = detect_tool_intents(message)
-    tool_results = execute_tools(context, tool_names)
-    response_type = resolve_response_type(message, tool_names)
+    from google import genai
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-    # Compute baseline structured data & records analyzed
-    base_answer, structured_data, records_analyzed = synthesize_deterministic_response(
-        message, context, tool_names, tool_results, response_type
-    )
-
-    # 3. Live Google Gemini Invocation (if configured and not in mock mode)
-    if settings.GEMINI_API_KEY and not settings.MOCK_LLM:
-        try:
-            from google import genai
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-
-            prompt = f"""User Question: {message}
+    prompt = f"""User Question: {message}
 
 Active Workspace: {context.tenantName}
 Selected Board: {context.boardName or 'All Workspace Boards'}
@@ -324,50 +320,137 @@ Verified Tool Results:
 
 Please answer the user question directly, concisely, and professionally in clean Markdown based STRICTLY on the tool results above."""
 
-            models_to_try = [settings.AI_MODEL]
-            if settings.FALLBACK_MODEL and settings.FALLBACK_MODEL not in models_to_try:
-                models_to_try.append(settings.FALLBACK_MODEL)
+    models_to_try = [settings.AI_MODEL]
+    if settings.FALLBACK_MODEL and settings.FALLBACK_MODEL not in models_to_try:
+        models_to_try.append(settings.FALLBACK_MODEL)
 
-            last_error = None
-            for candidate_model in models_to_try:
-                try:
-                    response = client.models.generate_content(
-                        model=candidate_model,
-                        contents=prompt,
-                        config={
-                            "system_instruction": SYSTEM_INSTRUCTION,
-                            "temperature": 0.2,
-                        }
-                    )
+    last_error = None
+    for candidate_model in models_to_try:
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                response = client.models.generate_content(
+                    model=candidate_model,
+                    contents=prompt,
+                    config={
+                        "system_instruction": SYSTEM_INSTRUCTION,
+                        "temperature": 0.2,
+                    }
+                )
 
-                    if response and response.text:
-                        return ChatResponse(
-                            responseType=response_type,
-                            answer=response.text.strip(),
-                            structuredData=structured_data,
-                            toolsUsed=tool_names,
-                            recordsAnalyzed=records_analyzed,
-                            dataScope=context.tenantName,
-                            confidence="high",
-                            generatedAt=datetime.now(timezone.utc).isoformat()
-                        )
-                except Exception as model_err:
-                    last_error = model_err
-                    print(f"[AI Agent] Model '{candidate_model}' invocation failed: {model_err}. Trying fallback...")
+                if response and response.text and response.text.strip():
+                    return response.text.strip(), candidate_model
+                else:
+                    raise ValueError(f"Empty or malformed model output received from '{candidate_model}'")
+            except Exception as model_err:
+                last_error = model_err
+                err_str = str(model_err).lower()
+                # Fast-fail non-retryable errors
+                if any(k in err_str for k in ["api_key_invalid", "permission", "invalid argument", "not found"]):
+                    break
+                # Retry transient errors once with bounded delay
+                if attempt == 0 and any(k in err_str for k in ["503", "429", "timeout", "unavailable", "rate limit"]):
+                    await asyncio.sleep(0.3)
+                    continue
+                break
 
-            if last_error:
-                print(f"[AI Agent] All candidate models failed ({last_error}), falling back to deterministic engine.")
-        except Exception as err:
-            print(f"[AI Agent] Gemini call failed, falling back to deterministic engine: {err}")
+    raise last_error or RuntimeError("All candidate Gemini models failed to generate a response")
 
-    # 4. Deterministic Grounded Engine (Used for tests, offline mode, and API fallback)
-    return ChatResponse(
-        responseType=response_type,
-        answer=base_answer,
-        structuredData=structured_data,
-        toolsUsed=tool_names,
-        recordsAnalyzed=records_analyzed,
-        dataScope=context.tenantName,
-        confidence="high",
-        generatedAt=datetime.now(timezone.utc).isoformat()
+async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
+    """
+    Main entry point for AI question answering.
+    1. Checks intent guardrails (Security & Cross-Org isolation).
+    2. Executes allowlisted read-only tools on authorized context.
+    3. Resolves responseType and builds authoritative local baseline.
+    4. Routes execution based on AI_RESPONSE_MODE:
+       - 'auto': Attempt Gemini first, automatically fall back to local engine on failure.
+       - 'local': Use deterministic local engine directly without external calls.
+       - 'llm': Attempt Gemini only, returning service error on provider failure.
+    """
+    # 1. Guardrails Check (Fast deterministic pre-filter)
+    guardrail_response = check_intent_guardrails(message, context)
+    if guardrail_response:
+        return guardrail_response
+
+    # 2. Tool Execution
+    tool_names = detect_tool_intents(message)
+    tool_results = execute_tools(context, tool_names)
+    response_type = resolve_response_type(message, tool_names)
+
+    # 3. Compute authoritative deterministic baseline
+    base_answer, structured_data, records_analyzed = synthesize_deterministic_response(
+        message, context, tool_names, tool_results, response_type
     )
+
+    mode = settings.effective_response_mode
+
+    # 4A. Local Mode: Deterministic local response engine directly
+    if mode == "local":
+        return ChatResponse(
+            responseType=response_type,
+            answer=base_answer,
+            structuredData=structured_data,
+            toolsUsed=tool_names,
+            recordsAnalyzed=records_analyzed,
+            dataScope=context.tenantName,
+            confidence="high",
+            generatedAt=datetime.now(timezone.utc).isoformat(),
+            generation=GenerationMeta(source="local", model=None, fallbackUsed=False)
+        )
+
+    # 4B. LLM-Only Mode: Must succeed via Gemini or fail with clear service error
+    if mode == "llm":
+        try:
+            llm_text, model_used = await call_gemini(message, context, tool_results, response_type)
+            return ChatResponse(
+                responseType=response_type,
+                answer=llm_text,
+                structuredData=structured_data,
+                toolsUsed=tool_names,
+                recordsAnalyzed=records_analyzed,
+                dataScope=context.tenantName,
+                confidence="high",
+                generatedAt=datetime.now(timezone.utc).isoformat(),
+                generation=GenerationMeta(source="llm", model=model_used, fallbackUsed=False)
+            )
+        except Exception as err:
+            logger.error(f"[AI Agent] LLM-only mode failed: {err}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"LLM Provider Error: {str(err)}"
+            )
+
+    # 4C. Auto Mode (Default): Attempt Gemini first, automatic fallback to local engine
+    try:
+        llm_text, model_used = await call_gemini(message, context, tool_results, response_type)
+        return ChatResponse(
+            responseType=response_type,
+            answer=llm_text,
+            structuredData=structured_data,
+            toolsUsed=tool_names,
+            recordsAnalyzed=records_analyzed,
+            dataScope=context.tenantName,
+            confidence="high",
+            generatedAt=datetime.now(timezone.utc).isoformat(),
+            generation=GenerationMeta(source="llm", model=model_used, fallbackUsed=False)
+        )
+    except Exception as err:
+        logger.warning(
+            f"[AI Agent] Gemini call failed ({type(err).__name__}: {err}). Automatically falling back to local deterministic engine."
+        )
+        return ChatResponse(
+            responseType=response_type,
+            answer=base_answer,
+            structuredData=structured_data,
+            toolsUsed=tool_names,
+            recordsAnalyzed=records_analyzed,
+            dataScope=context.tenantName,
+            confidence="high",
+            generatedAt=datetime.now(timezone.utc).isoformat(),
+            generation=GenerationMeta(
+                source="local",
+                model=None,
+                fallbackUsed=True,
+                failureReason=type(err).__name__
+            )
+        )
