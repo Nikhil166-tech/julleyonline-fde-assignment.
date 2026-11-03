@@ -11,6 +11,15 @@ JulleyOnline is a production-grade, multi-tenant SaaS Kanban project management 
 
 ---
 
+## Assignment Folder Layout (`collaborative-kanban/`)
+
+The repository root is the **`collaborative-kanban/` project folder** in the submission reference layout. It contains `frontend/`, `backend/`, `ai-service/`, `database/`, `docs/`, and `screenshots/`, plus the root configuration and README files. The public GitHub repository has a different name; clone it into the expected local folder using the command below.
+
+- **Database:** [`database/README.md`](database/README.md) explains where to find the authoritative [Prisma schema](backend/prisma/schema.prisma), migration history, and [ER diagram](docs/er-diagram.md). Prisma files remain under `backend/prisma/` so migrations and existing application commands keep working.
+- **Screenshots:** [`screenshots/`](screenshots/) contains the captured application screenshots. Existing copies under `docs/` remain to preserve links from detailed documentation and tooling.
+
+---
+
 ## 📌 Assignment Deliverables Directory
 
 Evaluators can directly access all key assignment deliverables below:
@@ -18,7 +27,7 @@ Evaluators can directly access all key assignment deliverables below:
 2. **Database Architecture & ER Diagram:** [`docs/er-diagram.md`](docs/er-diagram.md) — 8-entity Mermaid ER diagram, foreign keys, constraints, and cascade policies.
 3. **API & Real-Time WebSocket Documentation:** [`docs/api-documentation.md`](docs/api-documentation.md) — Complete REST endpoints, Zod schemas, OCC error payloads, and Socket.IO events.
 4. **Requirement Traceability Matrix (RTM):** [`docs/requirement-traceability-matrix.md`](docs/requirement-traceability-matrix.md) — Comprehensive matrix mapping requirements to source files, tests, and verification evidence.
-5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 140 passing automated tests across normal, boundary, security, and concurrency categories.
+5. **Comprehensive Test Matrix & Verification Evidence:** [`docs/test-matrix.md`](docs/test-matrix.md) — 193 documented passing automated tests across core backend, frontend browser, and Python AI suites.
 6. **Optional AI Kanban Assistant Specification:** [`docs/ai-assistant.md`](docs/ai-assistant.md) — Multi-tenant read-only intelligence extension, 4 allowlisted tools, FastAPI setup, and test evidence.
 
 ## Table of Contents
@@ -232,14 +241,14 @@ High-fidelity screenshots captured directly from the running application:
 
 | Screen | Description | Screenshot Link |
 | :--- | :--- | :---: |
-| **Authentication Screen** | Dual-pane login with branding & demo account shortcuts | [Login Screen](docs/phase3_01_login.png) |
-| **Kanban Board Workspace** | Active sprint board with Backlog, In Progress, Review, and Done columns | [Live Kanban Board](docs/phase3_03_kanban_board.png) |
-| **Searchable Board Selector** | Searchable dropdown with `#<id8>` badges, task counts & "Create Board" | [Board Selector](docs/phase3_02_boards.png) |
-| **Task Details Drawer** | Slide-out editor with priority badges, assignment, and OCC version pill | [Task Drawer](docs/phase3_04_task_drawer.png) |
-| **Real-Time Collaboration** | Multi-user presence avatar stack, Live status pill & Undo/Redo toolbar | [Live Collaboration](docs/phase4_collab_live.png) |
-| **Workspace Members** | Role management table (Org Admin, Tenant Admin, Member) | [Members Page](docs/phase3_05_members.png) |
-| **Activity Audit Feed** | Comprehensive audit trail of moves, edits, and assignments | [Activity Logs](docs/phase3_06_activities.png) |
-| **Workspace Settings** | Tenant workspace configuration & danger zone | [Settings Page](docs/phase3_07_settings.png) |
+| **Authentication Screen** | Dual-pane login with branding & demo account shortcuts | [Login Screen](screenshots/phase3_01_login.png) |
+| **Kanban Board Workspace** | Active sprint board with Backlog, In Progress, Review, and Done columns | [Live Kanban Board](screenshots/phase3_03_kanban_board.png) |
+| **Searchable Board Selector** | Searchable dropdown with `#<id8>` badges, task counts & "Create Board" | [Board Selector](screenshots/phase3_02_boards.png) |
+| **Task Details Drawer** | Slide-out editor with priority badges, assignment, and OCC version pill | [Task Drawer](screenshots/phase3_04_task_drawer.png) |
+| **Real-Time Collaboration** | Multi-user presence avatar stack, Live status pill & Undo/Redo toolbar | [Live Collaboration](screenshots/phase4_collab_live.png) |
+| **Workspace Members** | Role management table (Org Admin, Tenant Admin, Member) | [Members Page](screenshots/phase3_05_members.png) |
+| **Activity Audit Feed** | Comprehensive audit trail of moves, edits, and assignments | [Activity Logs](screenshots/phase3_06_activities.png) |
+| **Workspace Settings** | Tenant workspace configuration & danger zone | [Settings Page](screenshots/phase3_07_settings.png) |
 
 ---
 
@@ -254,8 +263,8 @@ High-fidelity screenshots captured directly from the running application:
 ### 1. Repository Setup
 
 ```bash
-git clone https://github.com/Nikhil166-tech/julleyonline-fde-assignment..git julleyonline-fde-assignment
-cd julleyonline-fde-assignment
+git clone https://github.com/Nikhil166-tech/julleyonline-fde-assignment..git collaborative-kanban
+cd collaborative-kanban
 ```
 
 ### 2. Backend Setup & Database Migration
