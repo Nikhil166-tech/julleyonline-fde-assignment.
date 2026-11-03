@@ -40,10 +40,14 @@ router.post('/chat', async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: {
+        responseType: aiResult.responseType || 'general_answer',
         answer: aiResult.answer,
+        structuredData: aiResult.structuredData || null,
         toolsUsed: aiResult.toolsUsed,
         confidence: aiResult.confidence,
         generatedAt: aiResult.generatedAt,
+        recordsAnalyzed: aiResult.recordsAnalyzed ?? context.metrics.totalTasks,
+        dataScope: aiResult.dataScope || context.tenantName,
         contextMeta: {
           tenantId: context.tenantId,
           tenantName: context.tenantName,

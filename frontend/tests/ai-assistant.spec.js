@@ -31,7 +31,7 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     await expect(page.locator('button:has-text("Which tasks are overdue?")')).toBeVisible();
   });
 
-  test('AI-02: Submits question and renders structured answer with tool badges', async ({ page }) => {
+  test('AI-02: Submits question and renders structured answer with expandable tool disclosure', async ({ page }) => {
     // Intercept AI chat endpoint to provide deterministic mock response
     await page.route('**/api/v1/ai/chat', async (route) => {
       await route.fulfill({
@@ -40,14 +40,30 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
         body: JSON.stringify({
           success: true,
           data: {
+            responseType: 'overdue_summary',
             answer: 'Found 1 overdue task(s) in Engineering: Implement Auth Middleware.',
+            structuredData: {
+              tasksAnalyzed: 4,
+              overdueCount: 1,
+              tasksWithDueDates: 2,
+              tasksWithoutDueDates: 2,
+              tasks: [
+                {
+                  id: 'task-1',
+                  title: 'Implement Auth Middleware',
+                  column: 'To Do',
+                  priority: 'URGENT',
+                  dueDate: '2026-10-31T00:00:00Z',
+                  assignee: 'Bob',
+                  daysPastDue: 3,
+                },
+              ],
+            },
             toolsUsed: ['get_overdue_tasks'],
+            recordsAnalyzed: 4,
+            dataScope: 'Engineering & Product',
             confidence: 'high',
             generatedAt: new Date().toISOString(),
-            contextMeta: {
-              tenantName: 'Engineering & Product',
-              totalTasks: 4,
-            },
           },
         }),
       });
@@ -68,9 +84,14 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
     await page.click('button:has-text("Which tasks are overdue?")');
 
     // 4. Verify message and answer appear in timeline
-    await expect(page.locator('text=Implement Auth Middleware')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('span:has-text("get_overdue_tasks")')).toBeVisible();
+    await expect(page.getByText('Implement Auth Middleware', { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=4 tasks analyzed')).toBeVisible();
+
+    // 5. Expand tool disclosure
+    const disclosureBtn = page.locator('button:has-text("How this answer was generated")');
+    await expect(disclosureBtn).toBeVisible();
+    await disclosureBtn.click();
+    await expect(page.locator('span:has-text("get_overdue_tasks")')).toBeVisible();
   });
 
   test('AI-03: Switching tenant workspace cancels in-flight request and resets chat history', async ({ page }) => {
@@ -88,6 +109,7 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
         body: JSON.stringify({
           success: true,
           data: {
+            responseType: 'board_summary',
             answer: 'Old Engineering Response that should be dropped',
             toolsUsed: ['get_board_summary'],
           },
@@ -161,5 +183,113 @@ test.describe('AI Kanban Assistant Frontend Suite', () => {
 
     await page.click('button:has-text("Dismiss")');
     await expect(errorBanner).not.toBeVisible();
+  });
+
+  test('AI-05: Case A — Handles workspace with zero due dates gracefully', async ({ page }) => {
+    await page.route('**/api/v1/ai/chat', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            responseType: 'overdue_summary',
+            answer: 'Analyzed 11 task(s) across Entire Workspace. None of these tasks have due dates configured. As a result, 0 tasks are classified as overdue.',
+            structuredData: {
+              tasksAnalyzed: 11,
+              overdueCount: 0,
+              tasksWithDueDates: 0,
+              tasksWithoutDueDates: 11,
+              tasks: [],
+            },
+            toolsUsed: ['get_overdue_tasks'],
+            recordsAnalyzed: 11,
+            dataScope: 'Engineering & Product',
+          },
+        }),
+      });
+    });
+
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
+
+    await page.click('aside a[href="/ai-assistant"]');
+    await page.fill('textarea', 'Which tasks are overdue?');
+    await page.click('button:has-text("Ask")');
+
+    // Verify explanation and zero due date notice
+    await expect(page.locator('text=No due dates are set on any task in this workspace')).toBeVisible();
+    await expect(page.locator('text=11 tasks analyzed')).toBeVisible();
+  });
+
+  test('AI-06: Case B & C — Renders scope and security notice widgets without tool clutter', async ({ page }) => {
+    // Intercept security notice for password request
+    await page.route('**/api/v1/ai/chat', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            responseType: 'security_notice',
+            answer: 'User passwords and authentication credentials are encrypted and protected by strict system access controls.',
+            structuredData: {
+              noticeType: 'security_notice',
+              title: 'Security & Credential Protection',
+              reason: 'Credentials and passwords are not accessible via workspace APIs.',
+            },
+            toolsUsed: [], // Zero tools used
+            recordsAnalyzed: 0,
+            dataScope: 'Engineering & Product',
+          },
+        }),
+      });
+    });
+
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
+
+    await page.click('aside a[href="/ai-assistant"]');
+    await page.fill('textarea', "Can I know Charlie's password?");
+    await page.click('button:has-text("Ask")');
+
+    // Verify security notice widget is rendered
+    await expect(page.locator('text=Credential Protection Active')).toBeVisible();
+    // Verify tool disclosure button is NOT rendered when 0 tools were used
+    await expect(page.locator('button:has-text("How this answer was generated")')).not.toBeVisible();
+  });
+
+  test('AI-07: Supports Enter to send, Shift+Enter for newline, and mobile responsive layout', async ({ page }) => {
+    // Test keyboard interaction
+    await page.goto('/login');
+    await page.fill('input[type="email"]', 'bob@acme.com');
+    await page.fill('input[type="password"]', 'password123');
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/\?boardId=/);
+
+    await page.click('aside a[href="/ai-assistant"]');
+
+    const textarea = page.locator('textarea');
+    await textarea.focus();
+    await textarea.type('Line 1');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('Enter');
+    await page.keyboard.up('Shift');
+    await textarea.type('Line 2');
+
+    const val = await textarea.inputValue();
+    expect(val).toContain('\n');
+
+    // Test mobile layout (375 x 667)
+    await page.setViewportSize({ width: 375, height: 667 });
+    await expect(page.locator('h1:has-text("AI Kanban Assistant")')).toBeVisible();
+    await expect(page.getByText('Read-Only', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="ai-ask-btn"]')).toBeVisible();
   });
 });

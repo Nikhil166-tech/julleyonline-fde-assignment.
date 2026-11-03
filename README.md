@@ -408,7 +408,8 @@ JulleyOnline includes an **optional, read-only AI Kanban Assistant** extension (
 - **Data Minimization:** Sensitive credentials, passwords, and emails are stripped before data reaches the AI service.
 - **4 Allowlisted Read-Only Tools:** `get_tasks`, `get_overdue_tasks`, `get_activity_logs`, and `get_board_summary`.
 - **Tenant-Switching Race Protection:** Changing workspaces in the UI immediately aborts in-flight AI requests via `AbortController`, increments request sequencing counters, and resets chat history.
-- **Gemini 2.5 + Deterministic Mock Fallback:** Supports Gemini with automatic fallback to an in-memory deterministic analyzer for testing without API keys.
+- **Gemini 3.5 / 3.8 + Deterministic Fallback:** Supports Gemini 3.5 Flash and 3.8 Flash with automatic fallback to an in-memory deterministic analyzer for testing without API keys.
+- **Typed Enterprise Widgets & Intent Guardrails:** Answers are categorized into explicit response types (`overdue_summary`, `board_summary`, `task_list`, `activity_summary`, `scope_notice`, `security_notice`) with clean Markdown rendering and expandable tool disclosures.
 
 ### Quick Start for AI Service
 

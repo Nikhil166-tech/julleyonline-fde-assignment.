@@ -66,12 +66,19 @@ def get_overdue_tasks(
 
     overdue = []
     completed_past_due = []
+    total_in_scope = 0
+    with_due_dates = 0
+    on_schedule = 0
 
     for t in context.tasks:
         if board_id and t.boardId != board_id:
             continue
+        total_in_scope += 1
+
         if not t.dueDate:
             continue
+
+        with_due_dates += 1
 
         try:
             due = datetime.fromisoformat(t.dueDate.replace("Z", "+00:00"))
@@ -96,6 +103,9 @@ def get_overdue_tasks(
                 completed_past_due.append(task_info)
             else:
                 overdue.append(task_info)
+        else:
+            if not is_completed_column(t.columnName):
+                on_schedule += 1
 
     # Sort by urgency (URGENT -> HIGH -> MEDIUM -> LOW) and most overdue days
     priority_weights = {"URGENT": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
@@ -104,6 +114,10 @@ def get_overdue_tasks(
     return {
         "tool": "get_overdue_tasks",
         "reference_time": current_time_str,
+        "total_tasks_in_scope": total_in_scope,
+        "tasks_with_due_dates": with_due_dates,
+        "tasks_without_due_dates": max(0, total_in_scope - with_due_dates),
+        "on_schedule_count": on_schedule,
         "overdue_count": len(overdue),
         "completed_past_due_count": len(completed_past_due),
         "tasks": overdue

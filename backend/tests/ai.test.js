@@ -97,10 +97,14 @@ describe('AI Kanban Assistant Backend Test Suite', () => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(
             JSON.stringify({
+              responseType: 'task_list',
               answer: 'Mock AI response: There are tasks scheduled for this board.',
+              structuredData: { totalTasks: 4 },
               toolsUsed: ['get_tasks', 'get_board_summary'],
               confidence: 'high',
               generatedAt: new Date().toISOString(),
+              recordsAnalyzed: 4,
+              dataScope: 'Engineering & Product',
             })
           );
         });
@@ -286,8 +290,11 @@ describe('AI Kanban Assistant Backend Test Suite', () => {
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.equal(body.success, true);
+      assert.equal(body.data.responseType, 'task_list');
       assert.ok(body.data.answer.includes('Mock AI response'));
       assert.deepEqual(body.data.toolsUsed, ['get_tasks', 'get_board_summary']);
+      assert.equal(body.data.recordsAnalyzed, 4);
+      assert.equal(body.data.dataScope, 'Engineering & Product');
       assert.equal(body.data.contextMeta.tenantId, acmeEngTenant.id);
       assert.equal(body.data.contextMeta.boardId, engBoard.id);
     } finally {

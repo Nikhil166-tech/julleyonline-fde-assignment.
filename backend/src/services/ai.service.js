@@ -45,10 +45,14 @@ export class AiService {
       }
 
       return {
+        responseType: data.responseType || 'general_answer',
         answer: data.answer,
+        structuredData: data.structuredData || null,
         toolsUsed: data.toolsUsed || [],
         confidence: data.confidence || 'high',
         generatedAt: data.generatedAt || new Date().toISOString(),
+        recordsAnalyzed: data.recordsAnalyzed ?? null,
+        dataScope: data.dataScope || null,
       };
     } catch (err) {
       clearTimeout(timeout);

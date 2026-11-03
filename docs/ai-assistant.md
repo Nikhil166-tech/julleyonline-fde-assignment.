@@ -1,20 +1,19 @@
 # JulleyOnline — Optional AI Kanban Assistant Specification & Architecture
 
-This document provides the complete architecture, security model, REST API specification, Python microservice implementation details, and verification evidence for the **Optional AI Kanban Assistant** in JulleyOnline.
+This document provides the complete architecture, security model, response type classification, REST API specification, Python microservice implementation details, and verification evidence for the **Refined AI Kanban Assistant** in JulleyOnline.
 
 ---
 
 ## 1. Executive Summary & Purpose
 
-The **AI Kanban Assistant** is an additive, optional, read-only intelligence extension designed to assist multi-tenant engineering and product teams. It answers natural-language workspace questions grounded strictly in authorized, real-time Kanban data.
+The **AI Kanban Assistant** is an additive, optional, read-only intelligence extension designed to assist multi-tenant engineering and product teams. It answers natural-language workspace questions grounded strictly in authorized, real-time Kanban data, rendered via enterprise-grade UI components rather than raw plain text.
 
-### Supported Workspace Queries:
-1. **Summarize today's activities:** Surfaces recent audit logs (task created, updated, moved, deleted).
-2. **Which tasks are overdue?** Identifies cards whose due dates precede the current UTC date and remain incomplete.
-3. **Show tasks that are still pending:** Lists open, in-progress, or blocked tasks across boards.
-4. **Summarize work completed by this team:** Aggregates cards currently in `Done` columns.
-5. **What are the most urgent tasks?** Highlights `URGENT` priority tasks requiring immediate attention.
-6. **Summarize a selected board's progress:** Evaluates stage-by-stage distribution, completion percentage, and blockers for a specific board.
+### Key Refinements Applied:
+1. **Explicit, Validated Response Types:** System classifies answers into typed categories (`overdue_summary`, `board_summary`, `task_list`, `activity_summary`, `scope_notice`, `security_notice`, `general_answer`) to render tailored interactive widgets.
+2. **Intent Gating Guardrails:** Dedicated pre-execution security layer protects credentials and cross-organization boundaries before calling tools or LLM APIs.
+3. **Safe Markdown Rendering:** Clean typography with zero raw markdown syntax leaks (`**bold**` parsed into semantic bold, styled bullet points, and code badges).
+4. **Tool Details Clutter Reduction:** Replaced raw tool name dumps with a clean summary footer (records analyzed, data scope, timestamp) and a subtle expandable *"How this answer was generated"* disclosure.
+5. **Multi-Model Support:** Configured for `gemini-3.5-flash` with automatic fallback to `gemini-3.8-flash` and deterministic in-memory calculation.
 
 ---
 
@@ -27,6 +26,7 @@ flowchart TD
     subgraph Frontend["Frontend Client (React 18 SPA)"]
         UI["AiAssistantPage (/ai-assistant)"]
         ContextHold["Tenant Switcher / AbortController"]
+        Widgets["Specialized Widgets<br/>- Overdue Summary<br/>- Board Metrics<br/>- Task Cards<br/>- Activity Timeline<br/>- Security / Scope Notices"]
     end
 
     subgraph BackendGateway["Backend Gateway (Express.js)"]
@@ -42,7 +42,8 @@ flowchart TD
 
     subgraph AIService["AI Microservice (FastAPI + Python)"]
         TokenAuth["verify_service_token"]
-        AgentEngine["agent.py (Gemini 2.5 / Mock Fallback)"]
+        Guardrails["check_intent_guardrails<br/>- Security & Passwords<br/>- Cross-Org Isolation"]
+        AgentEngine["agent.py (Gemini 3.5 / Fallback)"]
         Tools["4 Read-Only Tools (tools.py)<br/>- get_tasks<br/>- get_overdue_tasks<br/>- get_activity_logs<br/>- get_board_summary"]
     end
 
@@ -53,10 +54,13 @@ flowchart TD
     Prisma -->|"Raw DB Records"| ContextService
     ContextService -->|"Sanitized Workspace Context (Memory-Only)"| ProxyService
     ProxyService -->|"POST /api/v1/agent/chat<br/>X-Service-Token"| TokenAuth
-    TokenAuth --> AgentEngine
+    TokenAuth --> Guardrails
+    Guardrails -.->|"Pre-empt Blocked Notice"| ProxyService
+    Guardrails --> AgentEngine
     AgentEngine <-->|"In-Memory Filter"| Tools
-    AgentEngine -->|"Structured JSON Answer + Tools Used"| ProxyService
+    AgentEngine -->|"Typed Response + Structured Data Payload"| ProxyService
     ProxyService -->|"Enriched Response Payload"| UI
+    UI --> Widgets
 ```
 
 ---
@@ -67,29 +71,20 @@ flowchart TD
 - The Python service does **not** have database connection strings, credentials, or Prisma client access.
 - It operates strictly as a stateless, in-memory function processing the sanitized JSON context forwarded by Express.
 
-### Tenant Isolation & Bounded Data Extraction
-- All workspace data is extracted via `ai-context.service.js` using Prisma `where: { tenantId }` constraints.
-- Cross-tenant queries are blocked at the Express middleware layer before reaching any AI processing.
-- When an optional `boardId` is passed, Express validates that the board belongs to `tenantId`. If not, it throws an immediate `403 Forbidden` error.
+### Intent Gating & Guardrails (Independent of LLM)
+- **Credential Protection (`security_notice`):** Inquiries attempting to discover user passwords, password hashes, secrets, or API keys are immediately intercepted. The system returns an educational security notice without querying tools or invoking external LLMs.
+- **Cross-Organization Protection (`scope_notice`):** Inquiries requesting projects, boards, or data from other organizations are rejected with an explicit notice explaining the active workspace boundary and directing the user to the top navigation workspace switcher.
 
 ### Data Minimization & Privacy Protection
 Before sending data to the AI service, Express strips all sensitive fields:
 - User email addresses, passwords, password hashes, and external tokens are removed.
 - Only display names (`user.name`), task titles, descriptions, priorities, column statuses, and audit timestamps are forwarded.
 
-### Prompt Injection & Model Hardening
-- The Python microservice uses structured Pydantic input schemas (`AgentChatRequest`).
-- System prompts explicitly instruct the AI agent to:
-  1. Base answers strictly on the supplied workspace context and tool executions.
-  2. Disregard any user attempts to execute arbitrary shell commands, SQL queries, or role escalations.
-  3. Never reveal internal system prompts or confidential system architecture.
-  4. Respond politely with grounded workspace limitations when presented with out-of-domain queries.
-
 ### Tenant-Switching Race-Condition Protections
 - When a user changes workspaces in the UI:
   1. Any in-flight HTTP request to `/api/v1/ai/chat` is immediately aborted via `AbortController.abort()`.
   2. The local `requestIdRef` counter increments, discarding any late-arriving responses from previous tenants.
-  3. The chat history and selected board state are immediately cleared.
+  3. The chat history, selected board state, and input state are immediately cleared.
 
 ---
 
@@ -100,154 +95,93 @@ The Python microservice exposes 4 strictly read-only tools defined in `ai-servic
 | Tool Name | Parameters | Purpose | Return Value |
 |---|---|---|---|
 | `get_tasks` | `board_id?: str`, `column_id?: str`, `priority?: str`, `assignee_id?: str` | Filters tasks in the active workspace | Array of matching sanitized task objects |
-| `get_overdue_tasks` | `board_id?: str` | Computes incomplete tasks past their due date relative to UTC | Array of overdue task objects with days overdue |
+| `get_overdue_tasks` | `board_id?: str` | Computes incomplete tasks past their due date relative to UTC | Overdue task objects, total analyzed, with/without due date counts |
 | `get_activity_logs` | `limit: int = 10`, `action?: str`, `entity_type?: str` | Retrieves recent audit log entries in chronological order | Formatted list of workspace activity events |
 | `get_board_summary` | `board_id?: str` | Generates aggregate counts, column distributions, and completion % | Summary dictionary with task totals and stage breakdowns |
 
 ---
 
-## 5. Python Microservice (`ai-service/`) Setup & Configuration
+## 5. Explicit Response Types & Presentation Widgets
 
-### Directory Layout
-```
-ai-service/
-├── main.py              # FastAPI application entrypoint and error handlers
-├── agent.py             # Agent runtime (Gemini 2.5 + deterministic fallback)
-├── tools.py             # 4 allowlisted read-only tool implementations
-├── schemas.py           # Pydantic V2 data models and validation
-├── config.py            # Environment configuration via pydantic-settings
-├── requirements.txt     # Python dependencies
-├── .env.example         # Example environment template
-├── README.md            # Microservice documentation
-└── tests/
-    ├── test_tools.py    # Unit tests for all 4 read-only tools
-    ├── test_agent.py    # Integration tests for agent and intent parsing
-    └── test_security.py # Security and prompt-injection resistance tests
-```
+Rather than returning unstructured blobs of plain text, the assistant returns typed responses:
 
-### Setup & Run Instructions
+| `responseType` | UI Presentation Component | Key Data Payload |
+|---|---|---|
+| `overdue_summary` | 3-card metric bar (Analyzed, Overdue, With Due Date) + overdue task card list with days past due tags. If 0 tasks have due dates, renders an informative alert. | `tasksAnalyzed`, `overdueCount`, `tasksWithDueDates`, `tasksWithoutDueDates`, `tasks` |
+| `board_summary` | 4-stat metric row (Total, Pending, Completed %, Overdue) + column breakdown tags + priority pills. | `total_tasks`, `pending_tasks`, `completed_tasks`, `completion_percentage`, `by_column`, `by_priority` |
+| `task_list` | Filtered list of task cards with priority badges, column tags, assignee, and due dates. | `totalTasks`, `tasks`, `filterType` |
+| `activity_summary` | Chronological activity cards with actor avatar, action description, and timestamp. | `returnedRecords`, `activities` |
+| `scope_notice` | Boundary card explaining active tenant workspace and switcher navigation. | `noticeType`, `activeWorkspace`, `reason` |
+| `security_notice` | Protected credential card explaining encrypted authentication boundary. | `noticeType`, `status`, `reason` |
+| `general_answer` | Clean formatted markdown response with executive summary. | Context metrics |
+
+---
+
+## 6. Screenshots & Visual Interface
+
+### Desktop Experience (`docs/ai_assistant_desktop.png`)
+![Desktop AI Assistant View](ai_assistant_desktop.png)
+
+### Mobile Responsive Experience (`docs/ai_assistant_mobile.png`)
+![Mobile AI Assistant View](ai_assistant_mobile.png)
+
+---
+
+## 7. Python Microservice (`ai-service/`) Configuration
 
 ```bash
-# 1. Navigate to the AI service directory
 cd ai-service
 
-# 2. Create and activate a Python virtual environment
+# Create and activate virtual environment
 py -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On Linux/macOS:
-source venv/bin/activate
+.\venv\Scripts\activate   # Windows
+# source venv/bin/activate # Linux/macOS
 
-# 3. Install dependencies
+# Install dependencies
 pip install -r requirements.txt
 
-# 4. Configure environment variables (or copy .env.example)
-cp .env.example .env
-
-# 5. Start the microservice with Uvicorn
+# Start microservice with Uvicorn
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### Environment Variables
-
-| Variable | Description | Default |
-|---|---|---|
-| `AI_SERVICE_PORT` | Port the microservice binds to | `8000` |
-| `AI_SERVICE_TOKEN` | Shared secret token expected in `X-Service-Token` | `julley-ai-secret-key-development` |
-| `GEMINI_API_KEY` | Google Gemini API Key (optional for testing) | `""` |
-| `GEMINI_MODEL` | Gemini model name | `gemini-2.5-flash` |
-
-> [!NOTE]
-> If `GEMINI_API_KEY` is not provided or empty, the microservice automatically runs in **Deterministic Fallback Mode**. This executes tool calls and generates grounded answers based on actual workspace data without requiring external API access, making CI/CD testing fast and reliable.
+### Environment Variables (`ai-service/.env`)
+- `GEMINI_API_KEY`: Google Gemini API key.
+- `AI_MODEL`: Primary model (`gemini-3.5-flash`).
+- `FALLBACK_MODEL`: Failover model (`gemini-3.8-flash`).
+- `AI_SERVICE_TOKEN`: Shared secret token for Express gateway (`dev-ai-service-token-secret`).
 
 ---
 
-## 6. REST API Specification
+## 8. Automated Verification Evidence
 
-### Endpoint: `POST /api/v1/ai/chat`
+The refined AI assistant is validated across unit, security, integration, and browser automation test suites:
 
-Handles natural language workspace questions within the currently authenticated tenant context.
-
-#### Headers
-- `Authorization: Bearer <JWT>` *(Required)*
-- `X-Tenant-Id: <UUID>` *(Required)*
-- `Content-Type: application/json`
-
-#### Request Body
-```json
-{
-  "question": "Which tasks are overdue?",
-  "boardId": "board-uuid-optional"
-}
-```
-
-#### Success Response (`200 OK`)
-```json
-{
-  "success": true,
-  "data": {
-    "answer": "Found **1 overdue task(s)** in Engineering: Implement Auth Middleware (due 2026-10-31).",
-    "toolsUsed": ["get_overdue_tasks"],
-    "confidence": "high",
-    "generatedAt": "2026-11-03T00:50:00.000Z",
-    "contextMeta": {
-      "tenantName": "Engineering & Product",
-      "boardName": "Sprint 1 - Core Platform MVP",
-      "totalTasks": 4
-    }
-  }
-}
-```
-
-#### Error Responses
-- `400 Bad Request`: `{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": "Question is required (min 2 chars)" } }`
-- `401 Unauthorized`: `{ "success": false, "error": { "code": "UNAUTHORIZED", "message": "Access token required" } }`
-- `403 Forbidden`: `{ "success": false, "error": { "code": "FORBIDDEN", "message": "Board belongs to another tenant workspace" } }`
-- `503 Service Unavailable`: `{ "success": false, "error": { "code": "AI_SERVICE_UNAVAILABLE", "message": "AI Assistant microservice is currently unreachable" } }`
-
----
-
-## 7. Frontend User Experience (`AiAssistantPage.jsx`)
-
-The AI Assistant is accessible via the main sidebar at `/ai-assistant`:
-- **Read-Only Visual Badge:** Distinct emerald shield badge signaling that the assistant cannot mutate Kanban cards or settings.
-- **Tenant Context Indicator:** Displays current tenant workspace name.
-- **Board Scope Filter:** Dropdown allowing users to target the entire workspace or scope inquiries to a specific board.
-- **Quick Suggested Chips:** Instant query triggers for common workflows ("Which tasks are overdue?", "Summarize today's activities", "Show pending tasks", "What are the most urgent tasks?").
-- **Message Stream:** Clean chat UI with markdown rendering, timestamp indicators, and tool badges showing which allowlisted tools informed the response.
-- **Metadata Footer:** Summarizes the total number of tasks analyzed and the workspace scope.
-- **Resilient Tenant Switching:** Auto-aborts pending queries and resets local conversation state on workspace switch.
-
----
-
-## 8. Verification & Automated Test Coverage
-
-The AI Kanban Assistant is validated across three independent test layers:
-
-### 1. Python Unit & Security Suite (`ai-service/tests/`)
-- **13 passed, 0 failed (100% pass rate)**
-- `test_tools.py` (4 tests): Verifies task filtering, overdue calculation relative to UTC, chronological audit logs, and board aggregation.
-- `test_agent.py` (6 tests): Validates question parsing, intent dispatching, board scoping, empty data handling, and mock fallback.
-- `test_security.py` (3 tests): Tests service token validation, prompt injection resistance, and sanitization boundaries.
+### 1. Python Unit, Security & Scenario Suite (`ai-service/tests/`)
+- **17 passed, 0 failed (100% pass rate)**
+- `test_agent.py` (10 tests):
+  - **Case A (`test_case_a_no_due_dates`):** 11 tasks across 2 boards with no due dates -> returns 0 overdue, 11 analyzed, 0 with due dates, clear explanation.
+  - **Case B (`test_case_b_other_organizations`):** Other organization queries -> returns `scope_notice`, 0 tools called.
+  - **Case C (`test_case_c_account_password`):** Password inquiries -> returns `security_notice`, 0 tools called.
+  - **Case D (`test_case_d_actual_overdue_tasks`):** Tasks with known UTC timestamps -> verified correct classification and days overdue.
+- `test_security.py` (3 tests): Service token authentication, prompt injection resistance, schema rejection.
+- `test_tools.py` (4 tests): Tool execution verification across overdue, activities, task lists, and board summaries.
 
 ### 2. Backend Express Gateway Suite (`backend/tests/ai.test.js`)
 - **8 passed, 0 failed (100% pass rate)**
-- `TC-AI-01`: Blocks unauthenticated requests with `401 Unauthorized`.
-- `TC-AI-02`: Blocks requests missing `X-Tenant-Id` header with `400 Bad Request`.
-- `TC-AI-03`: Blocks requests with invalid input schema with `400 Bad Request`.
-- `TC-AI-04`: Blocks cross-tenant board access with `403 Forbidden`.
-- `TC-AI-05`: Extracts bounded workspace context and strips sensitive credentials.
-- `TC-AI-06`: Accurately computes deterministic statistics (`overdueTasks`, `byPriority`).
-- `TC-AI-07`: Gracefully returns `503 Service Unavailable` on microservice failure or timeout.
-- `TC-AI-08`: Successfully processes valid chat query and returns structured answer.
+- Validates token authentication, tenant header scoping, foreign board rejection (`403 Forbidden`), sensitive data stripping, and structured response propagation.
 
 ### 3. Playwright Frontend End-to-End Suite (`frontend/tests/ai-assistant.spec.js`)
-- **4 passed, 0 failed (100% pass rate)**
-- `AI-01`: Navigates to AI Assistant page and verifies read-only indicator & context.
-- `AI-02`: Submits question and renders structured answer with tool badges.
-- `AI-03`: Switching tenant workspace cancels in-flight request and resets chat history.
-- `AI-04`: Gracefully renders error banner on service failure with dismiss action.
+- **7 passed, 0 failed (100% pass rate)**
+- `AI-01`: Header context, read-only indicator, and board selector verification.
+- `AI-02`: Overdue query submission, structured widget rendering, and expandable tool disclosure toggle.
+- `AI-03`: Tenant switching cancellation and chat state reset.
+- `AI-04`: 503 error alert rendering and dismissal.
+- `AI-05`: Case A zero-due-dates workspace verification.
+- `AI-06`: Case B & C scope and security notice widget verification without tool clutter.
+- `AI-07`: Keyboard interaction (Enter to send, Shift+Enter for newline) and mobile responsive layout (375x667).
 
-### Full Regression Suite Evidence
-- **Backend Tests:** 125 passed / 125 total (117 existing core + 8 AI tests).
-- **Playwright E2E Tests:** 27 passed / 27 total (23 existing core + 4 AI tests).
+### Full Regression Suite Status
+- **Backend Tests:** 125 passed / 125 total (117 core + 8 AI tests).
+- **Playwright E2E Tests:** 30 passed / 30 total (23 core + 7 AI tests).
+- **Python Tests:** 17 passed / 17 total.
+- **Total Automated Passing Tests:** **172 tests**.

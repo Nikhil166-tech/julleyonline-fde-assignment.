@@ -62,7 +62,11 @@ class ChatRequest(BaseModel):
     context: WorkspaceContext
 
 class ChatResponse(BaseModel):
+    responseType: str = "general_answer"  # task_list, overdue_summary, board_summary, activity_summary, scope_notice, security_notice, general_answer, error
     answer: str
+    structuredData: Optional[Dict[str, Any]] = None
     toolsUsed: List[str] = Field(default_factory=list)
     confidence: str = "high"
     generatedAt: str
+    recordsAnalyzed: Optional[int] = None
+    dataScope: Optional[str] = None
