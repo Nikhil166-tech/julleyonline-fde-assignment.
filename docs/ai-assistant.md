@@ -9,11 +9,14 @@ This document provides the complete architecture, security model, response type 
 The **AI Kanban Assistant** is an additive, optional, read-only intelligence extension designed to assist multi-tenant engineering and product teams. It answers natural-language workspace questions grounded strictly in authorized, real-time Kanban data, rendered via enterprise-grade UI components rather than raw plain text.
 
 ### Key Refinements Applied:
-1. **LLM-First Architecture with Automatic Local Fallback:** Google Gemini is the primary generative engine (`gemini-2.5-flash`, with support for `gemini-3.5-flash` / `gemini-3.8-flash`), backed by a bounded retry policy. When the external provider encounters rate limits (HTTP 429), transient outages (HTTP 503), timeouts, or network errors, the assistant seamlessly falls back to its deterministic Python engine without user downtime.
+1. **Three-Tier Cascade (Gemini -> Ollama Cloud -> Local Engine):**
+   - **Tier 1 (Google Gemini):** Primary LLM (`gemini-3.5-flash` / `gemini-3.8-flash`) with strict 3.5s fast-fail timeout to prevent gateway hangs.
+   - **Tier 2 (Ollama Cloud):** Secondary LLM (`gemma4:31b` via `https://ollama.com/api/chat`), automatically invoked if Gemini encounters rate limits (`HTTP 429`), high-demand spikes (`HTTP 503`), or timeouts.
+   - **Tier 3 (Local Deterministic Engine):** In-memory Python rule engine (`MOCK_LLM`), automatically invoked if all external LLMs fail or when running in offline/air-gapped environments.
 2. **Three Configurable Response Modes (`AI_RESPONSE_MODE`):**
-   - `auto` (default): Attempts Gemini first; automatically invokes the deterministic local response engine when Gemini fails or returns unusable output.
+   - `auto` (default): Executes Tier 1 (Gemini) -> Tier 2 (Ollama) -> Tier 3 (Local Deterministic Fallback).
    - `local`: Executes the deterministic Python response engine directly without external network requests.
-   - `llm`: Invokes Gemini only, returning HTTP 502 Bad Gateway if the provider fails.
+   - `llm`: Invokes Gemini then Ollama, returning HTTP 502 Bad Gateway if all external providers fail.
 3. **Transparent Generation Metadata Contract:** Every response includes authoritative provenance: `{ source: "llm" | "local" | "guardrail", model: string | null, fallbackUsed: boolean, failureReason?: string }`.
 4. **Subtle Enterprise UX on Fallback:** When a fallback occurs, the UI displays a clean informational indicator (*"Answered using local workspace analysis."*) and reflects the source in the disclosure without alarming users with raw technical error codes.
 5. **Explicit, Validated Response Types:** System classifies answers into typed categories (`overdue_summary`, `board_summary`, `task_list`, `activity_summary`, `scope_notice`, `security_notice`, `general_answer`) to render tailored interactive widgets.
@@ -154,33 +157,37 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 - `AI_RESPONSE_MODE`: Operating mode (`auto` [default], `local`, or `llm`).
 - `MOCK_LLM`: Backward-compatible override. When `true`, forces `local` mode.
 - `GEMINI_API_KEY`: Google Gemini API key.
-- `AI_MODEL`: Primary Gemini model (`gemini-2.5-flash` or `gemini-3.5-flash`).
+- `AI_MODEL`: Primary Gemini model (`gemini-3.5-flash` or `gemini-3.8-flash`).
 - `FALLBACK_MODEL`: Secondary Gemini model (`gemini-3.8-flash`).
+- `OLLAMA_API_KEY`: Ollama Cloud API key.
+- `OLLAMA_BASE_URL`: Ollama endpoint (`https://ollama.com/api`).
+- `OLLAMA_MODEL`: Ollama model (`gemma4:31b`).
 - `AI_SERVICE_TOKEN`: Shared secret token for Express gateway (`dev-ai-service-token-secret`).
 
 ---
 
 ## 8. Automated Verification Evidence
 
-The LLM-first AI assistant with automatic fallback is verified across unit, security, integration, and browser automation test suites:
+The 3-tier cascade AI assistant (Gemini -> Ollama Cloud -> Local Deterministic Fallback) is verified across unit, security, integration, and browser automation test suites:
 
 ### 1. Python Unit, Security & Scenario Suite (`ai-service/tests/`)
-- **29 passed, 0 failed (100% pass rate)**
-- `test_agent.py` (22 tests):
+- **30 passed, 0 failed (100% pass rate)**
+- `test_agent.py` (23 tests):
   - **Case A (`test_case_a_no_due_dates`):** 11 tasks across 2 boards with no due dates -> returns 0 overdue, 11 analyzed, 0 with due dates, clear explanation.
   - **Case B (`test_case_b_other_organizations`):** Other organization queries -> returns `scope_notice`, 0 tools called.
   - **Case C (`test_case_c_account_password`):** Password inquiries -> returns `security_notice`, 0 tools called.
   - **Case D (`test_case_d_actual_overdue_tasks`):** Tasks with known UTC timestamps -> verified correct classification and days overdue.
   - **Test 1:** Valid Gemini response generates `source=llm`, `fallbackUsed=false`.
   - **Test 2:** Successful Gemini call does not invoke fallback engine.
-  - **Test 3:** Gemini HTTP 429 quota exhaustion invokes local fallback seamlessly.
-  - **Test 4:** Gemini HTTP 503 transient service error invokes local fallback.
+  - **Tier 2 Test:** When Gemini fails, Ollama Cloud responds successfully with `source=llm`, `model="gemma4:31b (ollama)"`.
+  - **Test 3:** Gemini HTTP 429 quota exhaustion and Ollama failure invokes local fallback seamlessly.
+  - **Test 4:** Gemini HTTP 503 transient service error and Ollama failure invokes local fallback.
   - **Test 5:** LLM request timeout automatically invokes deterministic fallback.
   - **Test 6:** Network disconnect / DNS failure triggers local fallback.
   - **Test 7:** Missing or invalid API key in `auto` mode falls back gracefully.
   - **Test 8:** Empty or malformed output from LLM triggers local fallback.
   - **Test 9:** `AI_RESPONSE_MODE=local` executes deterministic engine without network calls.
-  - **Test 10:** `AI_RESPONSE_MODE=llm` fails with HTTP 502 and does not use local fallback.
+  - **Test 10:** `AI_RESPONSE_MODE=llm` fails with HTTP 502 when both Gemini and Ollama fail, and does not use local fallback.
   - **Test 11:** Numerical statistics and records analyzed match identically between modes.
   - **Test 12:** Generation metadata contract is accurate across guardrail, local, fallback, and LLM paths.
 - `test_security.py` (3 tests): Service token authentication, prompt injection resistance, schema rejection.
@@ -205,5 +212,5 @@ The LLM-first AI assistant with automatic fallback is verified across unit, secu
 ### Full Regression Suite Status
 - **Backend Tests:** 126 passed / 126 total (117 core + 9 AI tests).
 - **Playwright E2E Tests:** 32 passed / 32 total (23 core + 9 AI tests).
-- **Python Tests:** 29 passed / 29 total.
-- **Total Automated Passing Tests:** **187 tests**.
+- **Python Tests:** 30 passed / 30 total.
+- **Total Automated Passing Tests:** **188 tests**.

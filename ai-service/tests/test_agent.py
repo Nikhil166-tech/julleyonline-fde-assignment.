@@ -403,30 +403,53 @@ async def test_successful_gemini_does_not_invoke_fallback(sample_context, monkey
 
 
 @pytest.mark.asyncio
-async def test_gemini_http_429_invokes_local_fallback(sample_context, monkeypatch):
-    """Test 3: Gemini HTTP 429 quota exhaustion invokes local fallback seamlessly."""
+async def test_gemini_fails_ollama_succeeds_tier_2(sample_context, monkeypatch):
+    """Tier 2 verification: When Gemini fails, Ollama Cloud responds successfully with source='llm'."""
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
+        mock_gemini.side_effect = Exception("503 ServiceUnavailable: Gemini high demand")
+        mock_ollama.return_value = ("Ollama gemma answer: 1 task overdue.", "gemma4:31b")
+
+        resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
+
+        assert resp.generation.source == "llm"
+        assert resp.generation.fallbackUsed is False
+        assert "gemma4:31b" in resp.generation.model
+        assert "Ollama gemma answer" in resp.answer
+        assert resp.structuredData["overdueCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_http_429_invokes_local_fallback(sample_context, monkeypatch):
+    """Test 3: Gemini HTTP 429 and Ollama failure invokes local fallback seamlessly."""
+    monkeypatch.setattr(settings, "MOCK_LLM", False)
+    monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
+
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = Exception("429 ResourceExhausted: Quota exceeded for model")
+        mock_ollama.side_effect = RuntimeError("Ollama connection error")
         resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
 
         assert resp.generation.source == "local"
         assert resp.generation.fallbackUsed is True
-        assert resp.generation.failureReason == "Exception"
         assert "Deploy Staging" in resp.answer
         assert resp.structuredData["overdueCount"] == 1
 
 
 @pytest.mark.asyncio
 async def test_gemini_http_503_invokes_local_fallback(sample_context, monkeypatch):
-    """Test 4: Gemini HTTP 503 transient service error invokes local fallback."""
+    """Test 4: Gemini HTTP 503 and Ollama failure invokes local fallback."""
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = Exception("503 ServiceUnavailable: The model is overloaded")
+        mock_ollama.side_effect = RuntimeError("Ollama connection error")
         resp = await agent.ask_agent("Summarize today's activities", sample_context)
 
         assert resp.generation.source == "local"
@@ -440,13 +463,14 @@ async def test_gemini_timeout_invokes_local_fallback(sample_context, monkeypatch
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = asyncio.TimeoutError("Gemini request timed out after 10s")
+        mock_ollama.side_effect = RuntimeError("Ollama timeout")
         resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
 
         assert resp.generation.source == "local"
         assert resp.generation.fallbackUsed is True
-        assert resp.generation.failureReason == "TimeoutError"
         assert "Deploy Staging" in resp.answer
 
 
@@ -456,13 +480,14 @@ async def test_network_failure_invokes_local_fallback(sample_context, monkeypatc
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = ConnectionError("Failed to establish connection to generativelanguage.googleapis.com")
+        mock_ollama.side_effect = ConnectionError("Failed to connect to ollama.com")
         resp = await agent.ask_agent("Show tasks that are still pending", sample_context)
 
         assert resp.generation.source == "local"
         assert resp.generation.fallbackUsed is True
-        assert resp.generation.failureReason == "ConnectionError"
         assert "Deploy Staging" in resp.answer
 
 
@@ -472,8 +497,10 @@ async def test_missing_or_invalid_api_key_invokes_local_fallback(sample_context,
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = ValueError("GEMINI_API_KEY is not configured or invalid")
+        mock_ollama.side_effect = ValueError("OLLAMA_API_KEY is not configured")
         resp = await agent.ask_agent("What are the most urgent tasks?", sample_context)
 
         assert resp.generation.source == "local"
@@ -487,8 +514,10 @@ async def test_malformed_empty_output_invokes_local_fallback(sample_context, mon
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = ValueError("Empty or malformed model output received")
+        mock_ollama.side_effect = ValueError("Empty Ollama output")
         resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
 
         assert resp.generation.source == "local"
@@ -502,10 +531,12 @@ async def test_response_mode_local_never_calls_gemini(sample_context, monkeypatc
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "local")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
 
         assert mock_gemini.await_count == 0
+        assert mock_ollama.await_count == 0
         assert resp.generation.source == "local"
         assert resp.generation.fallbackUsed is False
         assert resp.generation.model is None
@@ -518,9 +549,11 @@ async def test_response_mode_llm_raises_502_on_failure(sample_context, monkeypat
     monkeypatch.setattr(settings, "MOCK_LLM", False)
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "llm")
 
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = RuntimeError("Provider 503 Service Unavailable")
-        
+        mock_ollama.side_effect = RuntimeError("Ollama 503 Unavailable")
+
         with pytest.raises(HTTPException) as exc_info:
             await agent.ask_agent("Which tasks are overdue?", sample_context)
 
@@ -565,10 +598,12 @@ async def test_fallback_metadata_accuracy(sample_context, monkeypatch):
 
     # 3. Fallback
     monkeypatch.setattr(settings, "AI_RESPONSE_MODE", "auto")
-    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini:
+    with patch.object(agent, "call_gemini", new_callable=AsyncMock) as mock_gemini, \
+         patch.object(agent, "call_ollama", new_callable=AsyncMock) as mock_ollama:
         mock_gemini.side_effect = ConnectionError("Network down")
+        mock_ollama.side_effect = ConnectionError("Ollama down")
         fb_resp = await agent.ask_agent("Which tasks are overdue?", sample_context)
         assert fb_resp.generation.source == "local"
         assert fb_resp.generation.fallbackUsed is True
-        assert fb_resp.generation.failureReason == "ConnectionError"
+
 

@@ -2,6 +2,7 @@ import json
 import re
 import logging
 import asyncio
+import httpx
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple, Optional
 from fastapi import HTTPException, status
@@ -326,10 +327,10 @@ Please answer the user question directly, concisely, and professionally in clean
 
     last_error = None
     for candidate_model in models_to_try:
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            try:
-                response = client.models.generate_content(
+        try:
+            # Enforce 3.5s timeout per candidate model using asyncio.to_thread
+            def _generate():
+                return client.models.generate_content(
                     model=candidate_model,
                     contents=prompt,
                     config={
@@ -338,23 +339,70 @@ Please answer the user question directly, concisely, and professionally in clean
                     }
                 )
 
-                if response and response.text and response.text.strip():
-                    return response.text.strip(), candidate_model
-                else:
-                    raise ValueError(f"Empty or malformed model output received from '{candidate_model}'")
-            except Exception as model_err:
-                last_error = model_err
-                err_str = str(model_err).lower()
-                # Fast-fail non-retryable errors
-                if any(k in err_str for k in ["api_key_invalid", "permission", "invalid argument", "not found"]):
-                    break
-                # Retry transient errors once with bounded delay
-                if attempt == 0 and any(k in err_str for k in ["503", "429", "timeout", "unavailable", "rate limit"]):
-                    await asyncio.sleep(0.3)
-                    continue
+            response = await asyncio.wait_for(asyncio.to_thread(_generate), timeout=3.5)
+
+            if response and response.text and response.text.strip():
+                return response.text.strip(), candidate_model
+            else:
+                raise ValueError(f"Empty or malformed model output received from '{candidate_model}'")
+        except Exception as model_err:
+            last_error = model_err
+            err_str = str(model_err).lower()
+            # Fast-fail non-retryable errors
+            if any(k in err_str for k in ["api_key_invalid", "permission", "invalid argument", "not found"]):
                 break
+            continue
 
     raise last_error or RuntimeError("All candidate Gemini models failed to generate a response")
+
+async def call_ollama(
+    message: str,
+    context: WorkspaceContext,
+    tool_results: Dict[str, Any],
+    response_type: str
+) -> Tuple[str, str]:
+    """
+    Tier 2 LLM generator: Ollama Cloud API (e.g. gemma4:31b).
+    Invoked automatically when Google Gemini is overloaded, rate-limited, or unavailable.
+    """
+    if not settings.OLLAMA_API_KEY:
+        raise ValueError("OLLAMA_API_KEY is not configured")
+
+    prompt = f"""User Question: {message}
+
+Workspace Scope: {context.tenantName}
+Active Board: {context.boardName or 'Entire Workspace'}
+Server Timestamp: {context.currentTime}
+Response Category: {response_type}
+
+Verified Tool Results:
+{json.dumps(tool_results, indent=2)}
+
+Please answer the user question directly, concisely, and professionally in clean Markdown based STRICTLY on the tool results above."""
+
+    url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/chat"
+    headers = {
+        "Authorization": f"Bearer {settings.OLLAMA_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": settings.OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": prompt}
+        ],
+        "stream": False
+    }
+
+    async with httpx.AsyncClient(timeout=5.0) as http_client:
+        resp = await http_client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Ollama API returned HTTP {resp.status_code}: {resp.text}")
+        data = resp.json()
+        content = data.get("message", {}).get("content", "").strip()
+        if not content:
+            raise ValueError(f"Empty content from Ollama model {settings.OLLAMA_MODEL}")
+        return content, settings.OLLAMA_MODEL
 
 async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
     """
@@ -363,9 +411,9 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
     2. Executes allowlisted read-only tools on authorized context.
     3. Resolves responseType and builds authoritative local baseline.
     4. Routes execution based on AI_RESPONSE_MODE:
-       - 'auto': Attempt Gemini first, automatically fall back to local engine on failure.
+       - 'auto': Attempt Gemini (Tier 1) -> Ollama (Tier 2) -> Local Engine (Tier 3).
        - 'local': Use deterministic local engine directly without external calls.
-       - 'llm': Attempt Gemini only, returning service error on provider failure.
+       - 'llm': Attempt Gemini, then Ollama; fail with 502 if both fail.
     """
     # 1. Guardrails Check (Fast deterministic pre-filter)
     guardrail_response = check_intent_guardrails(message, context)
@@ -398,7 +446,7 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
             generation=GenerationMeta(source="local", model=None, fallbackUsed=False)
         )
 
-    # 4B. LLM-Only Mode: Must succeed via Gemini or fail with clear service error
+    # 4B. LLM-Only Mode: Must succeed via Gemini or Ollama, or fail with clear service error
     if mode == "llm":
         try:
             llm_text, model_used = await call_gemini(message, context, tool_results, response_type)
@@ -413,14 +461,33 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
                 generatedAt=datetime.now(timezone.utc).isoformat(),
                 generation=GenerationMeta(source="llm", model=model_used, fallbackUsed=False)
             )
-        except Exception as err:
-            logger.error(f"[AI Agent] LLM-only mode failed: {err}")
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM Provider Error: {str(err)}"
-            )
+        except Exception as gemini_err:
+            logger.warning(f"[AI Agent] LLM mode: Gemini failed ({gemini_err}). Trying Ollama...")
+            try:
+                ollama_text, ollama_model = await call_ollama(message, context, tool_results, response_type)
+                return ChatResponse(
+                    responseType=response_type,
+                    answer=ollama_text,
+                    structuredData=structured_data,
+                    toolsUsed=tool_names,
+                    recordsAnalyzed=records_analyzed,
+                    dataScope=context.tenantName,
+                    confidence="high",
+                    generatedAt=datetime.now(timezone.utc).isoformat(),
+                    generation=GenerationMeta(source="llm", model=f"{ollama_model} (ollama)", fallbackUsed=False)
+                )
+            except Exception as ollama_err:
+                logger.error(f"[AI Agent] LLM-only mode failed on both providers: {ollama_err}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"LLM Provider Error: Gemini ({str(gemini_err)}) and Ollama ({str(ollama_err)}) both failed."
+                )
 
-    # 4C. Auto Mode (Default): Attempt Gemini first, automatic fallback to local engine
+    # 4C. Auto Mode (Default): Tier 1 (Gemini) -> Tier 2 (Ollama Cloud) -> Tier 3 (Local Deterministic Engine)
+    gemini_err_name = "None"
+    ollama_err_name = "None"
+
+    # Tier 1: Attempt Gemini
     try:
         llm_text, model_used = await call_gemini(message, context, tool_results, response_type)
         return ChatResponse(
@@ -434,23 +501,46 @@ async def ask_agent(message: str, context: WorkspaceContext) -> ChatResponse:
             generatedAt=datetime.now(timezone.utc).isoformat(),
             generation=GenerationMeta(source="llm", model=model_used, fallbackUsed=False)
         )
-    except Exception as err:
+    except Exception as gemini_err:
+        gemini_err_name = type(gemini_err).__name__
         logger.warning(
-            f"[AI Agent] Gemini call failed ({type(err).__name__}: {err}). Automatically falling back to local deterministic engine."
+            f"[AI Agent] Tier 1 (Gemini) failed ({gemini_err_name}: {gemini_err}). Attempting Tier 2 (Ollama Cloud)..."
         )
+
+    # Tier 2: Attempt Ollama Cloud
+    try:
+        ollama_text, ollama_model = await call_ollama(message, context, tool_results, response_type)
         return ChatResponse(
             responseType=response_type,
-            answer=base_answer,
+            answer=ollama_text,
             structuredData=structured_data,
             toolsUsed=tool_names,
             recordsAnalyzed=records_analyzed,
             dataScope=context.tenantName,
             confidence="high",
             generatedAt=datetime.now(timezone.utc).isoformat(),
-            generation=GenerationMeta(
-                source="local",
-                model=None,
-                fallbackUsed=True,
-                failureReason=type(err).__name__
-            )
+            generation=GenerationMeta(source="llm", model=f"{ollama_model} (ollama)", fallbackUsed=False)
         )
+    except Exception as ollama_err:
+        ollama_err_name = type(ollama_err).__name__
+        logger.warning(
+            f"[AI Agent] Tier 2 (Ollama) failed ({ollama_err_name}: {ollama_err}). Automatically falling back to Tier 3 (Local Deterministic Engine)."
+        )
+
+    # Tier 3: Local Deterministic Engine (Zero Downtime Fallback)
+    return ChatResponse(
+        responseType=response_type,
+        answer=base_answer,
+        structuredData=structured_data,
+        toolsUsed=tool_names,
+        recordsAnalyzed=records_analyzed,
+        dataScope=context.tenantName,
+        confidence="high",
+        generatedAt=datetime.now(timezone.utc).isoformat(),
+        generation=GenerationMeta(
+            source="local",
+            model=None,
+            fallbackUsed=True,
+            failureReason=f"Gemini: {gemini_err_name}, Ollama: {ollama_err_name}"
+        )
+    )

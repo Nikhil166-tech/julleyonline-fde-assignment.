@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     AI_MODEL: str = "gemini-3.5-flash"
     FALLBACK_MODEL: str = "gemini-3.8-flash"
+    OLLAMA_API_KEY: Optional[str] = None
+    OLLAMA_BASE_URL: str = "https://ollama.com/api"
+    OLLAMA_MODEL: str = "gemma4:31b"
     AI_RESPONSE_MODE: str = "auto"  # 'auto', 'local', 'llm'
     MOCK_LLM: bool = False
     HOST: str = "0.0.0.0"
